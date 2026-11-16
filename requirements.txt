@@ -1,4 +1,9 @@
-Flask
-joblib
-scikit-learn
-mysql-connector-python
+Flask==3.1.0
+joblib==1.4.2
+scikit-learn==1.6.1
+mysql-connector-python==9.1.0
+gunicorn==23.0.0
+waitress==3.0.2
+Flask-Limiter==3.8.0
+Pillow==11.0.0
+pytz
