@@ -3,45 +3,345 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login Administrator — CivicPulse</title>
+    <title>Dashboard Admin — CivicPulse</title>
     <style>
-        body { font-family: system-ui, -apple-system, sans-serif; background: #f4f6f9; color: #1f2937; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 16px; }
-        .login-box { background: #fff; width: 100%; max-width: 380px; padding: 28px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
-        h1 { margin: 0 0 6px; font-size: 1.4rem; color: #1e3a8a; }
-        p.sub { margin: 0 0 20px; font-size: 0.9rem; color: #6b7280; }
-        label { display: block; font-weight: 600; margin: 12px 0 4px; font-size: 0.9rem; }
-        input { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; font-family: inherit; }
-        button { width: 100%; background: #1e3a8a; color: #fff; border: none; padding: 11px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-top: 18px; font-size: 0.95rem; }
-        button:hover { background: #1d4ed8; }
-        .flash { padding: 10px 12px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 14px; background: #fee2e2; color: #991b1b; }
-        .flash.info, .flash.warning { background: #fef3c7; color: #92400e; }
-        .back-link { display: block; text-align: center; margin-top: 16px; font-size: 0.88rem; color: #1e3a8a; text-decoration: none; }
+        :root {
+            --bg: #f3f7ff;
+            --primary: #1d4ed8;
+            --primary-dark: #163ea8;
+            --success: #16a34a;
+            --warning: #f59e0b;
+            --text: #0f172a;
+            --muted: #475569;
+            --line: #e2e8f0;
+            --card: #ffffff;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: linear-gradient(180deg, #eef5ff 0%, #f8fafc 100%);
+            color: var(--text);
+        }
+
+        .container {
+            max-width: 1260px;
+            margin: 0 auto;
+            padding: 32px 20px 64px;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 18px;
+            padding: 20px 24px;
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+            color: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 42px rgba(29, 78, 216, 0.16);
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: clamp(1.7rem, 2vw, 2.2rem);
+        }
+
+        .brand p {
+            margin: 6px 0 0;
+            color: rgba(255,255,255,0.8);
+        }
+
+        .nav {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .nav a, .nav button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 11px 16px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.12);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.2);
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(180px, 1fr));
+            gap: 18px;
+            margin-top: 28px;
+        }
+
+        .stat-box {
+            background: var(--card);
+            border-radius: 20px;
+            border: 1px solid var(--line);
+            padding: 22px 20px;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+        }
+
+        .stat-box .label {
+            display: block;
+            color: var(--muted);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 12px;
+        }
+
+        .stat-box strong {
+            font-size: clamp(1.7rem, 2vw, 2.4rem);
+            letter-spacing: -0.04em;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1.3fr 0.7fr;
+            gap: 22px;
+            margin-top: 28px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 22px;
+            padding: 22px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+        }
+
+        h2 {
+            margin: 0 0 18px;
+            font-size: 1.2rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px 10px;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            color: var(--muted);
+            font-size: 0.74rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #dbeafe;
+            color: var(--primary);
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: #f1f5f9;
+            color: var(--muted);
+        }
+
+        .status-pill.verified { background: #dcfce7; color: #166534; }
+        .status-pill.pending { background: #fef3c7; color: #92400e; }
+
+        .form-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        select, input {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #f8fafc;
+            padding: 11px 12px;
+            font-size: 0.96rem;
+            font-family: inherit;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: rgba(29, 78, 216, 0.7);
+            box-shadow: 0 0 0 4px rgba(29, 78, 216, 0.12);
+        }
+
+        button.submit-btn {
+            width: 100%;
+            margin-top: 18px;
+            border: none;
+            border-radius: 14px;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, var(--primary) 0%, #0ea5e9 100%);
+            color: white;
+            font-weight: 800;
+            cursor: pointer;
+            box-shadow: 0 12px 22px rgba(29, 78, 216, 0.18);
+        }
+
+        .empty-state {
+            padding: 18px;
+            border: 1px dashed var(--line);
+            border-radius: 14px;
+            background: #f8fafc;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        @media (max-width: 900px) {
+            .stats, .row {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 680px) {
+            .stats, .row {
+                grid-template-columns: 1fr;
+            }
+
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
     </style>
 </head>
 <body>
-<div class="login-box">
-    <h1>Login Administrator</h1>
-    <p class="sub">Masuk untuk memverifikasi laporan dan memantau statistik CivicPulse.</p>
+    <div class="container">
+        <header class="topbar">
+            <div class="brand">
+                <h1>CivicPulse Admin</h1>
+                <p>Dashboard verifikasi dan monitoring pengaduan kota</p>
+            </div>
+            <div class="nav">
+                <a href="{{ url_for('index') }}">Halaman Publik</a>
+                <a href="{{ url_for('logout') }}">Logout</a>
+            </div>
+        </header>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="flash {{ category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
+        <section class="stats">
+            <div class="stat-box">
+                <span class="label">Total Laporan</span>
+                <strong>{{ ringkasan.total }}</strong>
+            </div>
+            <div class="stat-box">
+                <span class="label">Menunggu Verifikasi</span>
+                <strong>{{ ringkasan.menunggu }}</strong>
+            </div>
+            <div class="stat-box">
+                <span class="label">Dalam Proses</span>
+                <strong>{{ ringkasan.proses }}</strong>
+            </div>
+            <div class="stat-box">
+                <span class="label">Selesai</span>
+                <strong>{{ ringkasan.selesai }}</strong>
+            </div>
+        </section>
 
-    <form method="POST">
-        <label>Email Administrator</label>
-        <input type="email" name="email" placeholder="admin@civicpulse.id" required>
+        <div class="row">
+            <div class="card">
+                <h2>Daftar Laporan Pengaduan</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Judul</th>
+                            <th>Kategori</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in laporan %}
+                        <tr>
+                            <td>#{{ item.id }}</td>
+                            <td>
+                                <strong>{{ item.title }}</strong><br>
+                                <small>{{ item.area or 'Area umum' }}</small>
+                            </td>
+                            <td><span class="badge">{{ label_map.get(item.verified_category or item.predicted_category, item.predicted_category) }}</span></td>
+                            <td>
+                                <span class="status-pill {% if item.status == 'Terverifikasi' or item.status == 'Dalam Tindak Lanjut' %}verified{% elif item.status == 'Menunggu Verifikasi' %}pending{% endif %}">
+                                    {{ item.status }}
+                                </span>
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('verifikasi_laporan', complaint_id=item.id) }}">
+                                    <div class="form-grid">
+                                        <div>
+                                            <label for="verified_category_{{ item.id }}">Kategori</label>
+                                            <select id="verified_category_{{ item.id }}" name="verified_category">
+                                                <option value="">-- Tetap Prediksi AI --</option>
+                                                {% for key, value in label_map.items() %}
+                                                    <option value="{{ key }}" {% if item.verified_category == key %}selected{% endif %}>{{ value }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label for="status_{{ item.id }}">Status</label>
+                                            <select id="status_{{ item.id }}" name="status">
+                                                <option value="Menunggu Verifikasi" {% if item.status == 'Menunggu Verifikasi' %}selected{% endif %}>Menunggu Verifikasi</option>
+                                                <option value="Terverifikasi" {% if item.status == 'Terverifikasi' %}selected{% endif %}>Terverifikasi</option>
+                                                <option value="Dalam Tindak Lanjut" {% if item.status == 'Dalam Tindak Lanjut' %}selected{% endif %}>Dalam Tindak Lanjut</option>
+                                                <option value="Selesai" {% if item.status == 'Selesai' %}selected{% endif %}>Selesai</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <button class="submit-btn" type="submit">Perbarui</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5">
+                                <div class="empty-state">Belum ada laporan yang masuk.</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
 
-        <label>Kata Sandi</label>
-        <input type="password" name="password" placeholder="Masukkan kata sandi" required>
-
-        <button type="submit">Masuk ke Dashboard</button>
-    </form>
-
-    <a href="{{ url_for('index') }}" class="back-link">&larr; Kembali ke Halaman Pengaduan Masyarakat</a>
-</div>
+            <div class="card">
+                <h2>Ringkasan Kategori</h2>
+                {% if statistik %}
+                    {% for item in statistik %}
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 10px; border-bottom: 1px solid var(--line);">
+                        <span>{{ label_map.get(item.kategori, item.kategori) }}</span>
+                        <strong>{{ item.total }}</strong>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">Belum ada data kategori.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 </body>
 </html>

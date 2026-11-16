@@ -228,11 +228,27 @@ def index():
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15")
             daftar_laporan = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total
+                FROM complaints
+                GROUP BY kategori
+                """
+            )
+            statistik = [dict(row) for row in cursor.fetchall()]
             cursor.close()
         else:
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15")
             daftar_laporan = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total
+                FROM complaints
+                GROUP BY kategori
+                """
+            )
+            statistik = cursor.fetchall()
             cursor.close()
     finally:
         conn.close()
@@ -241,6 +257,7 @@ def index():
         "index.html",
         hasil=hasil_prediksi,
         laporan=daftar_laporan,
+        statistik=statistik,
         label_map=LABEL_TAMPILAN,
     )
 

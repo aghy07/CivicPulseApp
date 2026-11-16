@@ -5,104 +5,497 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CivicPulse — Pengaduan Masyarakat Perkotaan</title>
     <style>
-        body { font-family: system-ui, -apple-system, sans-serif; background: #f4f6f9; color: #1f2937; margin: 0; padding: 24px; }
-        .container { max-width: 960px; margin: 0 auto; }
-        header { background: #1e3a8a; color: #fff; padding: 20px 24px; border-radius: 10px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
-        header h1 { margin: 0 0 4px; font-size: 1.5rem; }
-        header p { margin: 0; opacity: 0.9; font-size: 0.9rem; }
-        .nav-btn { background: rgba(255,255,255,0.18); color: #fff; text-decoration: none; padding: 8px 14px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; }
-        .nav-btn:hover { background: rgba(255,255,255,0.28); }
-        .card { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 24px; }
-        h2 { margin-top: 0; font-size: 1.15rem; color: #1e3a8a; }
-        label { display: block; font-weight: 600; margin: 10px 0 4px; font-size: 0.9rem; }
-        input, textarea { width: 100%; padding: 9px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; font-family: inherit; }
-        button { background: #1e3a8a; color: #fff; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-top: 14px; }
-        button:hover { background: #1d4ed8; }
-        .alert { background: #ecfdf5; border-left: 4px solid #10b981; padding: 14px; border-radius: 6px; margin-bottom: 20px; }
-        .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; background: #dbeafe; color: #1e40af; }
-        .status-badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; background: #f3f4f6; color: #374151; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
-        th { background: #f9fafb; }
+        :root {
+            --bg: #f3f7ff;
+            --primary: #1d4ed8;
+            --primary-dark: #163ea8;
+            --primary-soft: #dbeafe;
+            --accent: #0ea5e9;
+            --success: #16a34a;
+            --warning: #f59e0b;
+            --text: #0f172a;
+            --muted: #475569;
+            --card: #ffffff;
+            --line: #e2e8f0;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: linear-gradient(180deg, #eef5ff 0%, #f8fafc 100%);
+            color: var(--text);
+        }
+
+        a { color: inherit; text-decoration: none; }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px 20px 72px;
+        }
+
+        .topbar {
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+            color: white;
+            border-radius: 24px;
+            padding: 24px 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
+            box-shadow: 0 20px 40px rgba(29, 78, 216, 0.18);
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: clamp(1.8rem, 2.2vw, 2.5rem);
+            letter-spacing: -0.04em;
+        }
+
+        .brand p {
+            margin: 8px 0 0;
+            color: rgba(255,255,255,0.8);
+            font-size: 0.95rem;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 18px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.2);
+            font-weight: 700;
+            backdrop-filter: blur(12px);
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 24px;
+            margin-top: 28px;
+        }
+
+        .hero-copy, .hero-panel, .card {
+            background: rgba(255,255,255,0.9);
+            border: 1px solid rgba(226,232,240,0.9);
+            border-radius: 24px;
+            box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+        }
+
+        .hero-copy {
+            padding: 32px;
+        }
+
+        .hero-copy .eyebrow {
+            display: inline-block;
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 0.74rem;
+            font-weight: 700;
+            background: var(--primary-soft);
+            color: var(--primary);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .hero-copy h2 {
+            margin: 18px 0 14px;
+            font-size: clamp(2rem, 4vw, 3.1rem);
+            line-height: 1.08;
+            letter-spacing: -0.05em;
+        }
+
+        .hero-copy p {
+            margin: 0 0 22px;
+            color: var(--muted);
+            font-size: 1.02rem;
+            line-height: 1.7;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .primary-btn, .secondary-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 14px 20px;
+            border-radius: 14px;
+            font-weight: 700;
+            transition: 0.2s ease;
+            border: 1px solid transparent;
+        }
+
+        .primary-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            color: white;
+            box-shadow: 0 14px 24px rgba(29, 78, 216, 0.22);
+        }
+
+        .secondary-btn {
+            background: white;
+            color: var(--primary);
+            border-color: rgba(29, 78, 216, 0.2);
+        }
+
+        .hero-panel {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(120px, 1fr));
+            gap: 16px;
+            margin-top: 14px;
+        }
+
+        .stat-box {
+            background: linear-gradient(180deg, #f8fbff, #eef5ff);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 18px;
+        }
+
+        .stat-box span {
+            display: block;
+            color: var(--muted);
+            font-size: 0.76rem;
+            margin-bottom: 10px;
+        }
+
+        .stat-box strong {
+            font-size: 1.7rem;
+            letter-spacing: -0.03em;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 24px;
+            margin-top: 28px;
+        }
+
+        .card {
+            padding: 24px;
+        }
+
+        h3 {
+            margin: 0 0 18px;
+            font-size: 1.18rem;
+            color: var(--text);
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(200px, 1fr));
+            gap: 18px;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .field.full {
+            grid-column: 1 / -1;
+        }
+
+        label {
+            font-weight: 700;
+            color: var(--text);
+            font-size: 0.92rem;
+        }
+
+        input, textarea {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #f8fafc;
+            padding: 13px 14px;
+            font-size: 0.96rem;
+            font-family: inherit;
+            color: var(--text);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: rgba(29, 78, 216, 0.7);
+            box-shadow: 0 0 0 4px rgba(29, 78, 216, 0.12);
+            background: white;
+        }
+
+        textarea {
+            min-height: 140px;
+            resize: vertical;
+        }
+
+        .submit-btn {
+            margin-top: 18px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            border: none;
+            color: white;
+            padding: 14px 18px;
+            border-radius: 14px;
+            font-size: 0.98rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 10px 18px rgba(29, 78, 216, 0.22);
+        }
+
+        .alert {
+            margin: 24px 0 0;
+            background: linear-gradient(135deg, rgba(22, 163, 74, 0.1), rgba(16, 185, 129, 0.05));
+            border: 1px solid rgba(22, 163, 74, 0.2);
+            border-left: 6px solid var(--success);
+            color: #14532d;
+            padding: 20px 18px;
+            border-radius: 18px;
+            line-height: 1.7;
+            font-weight: 500;
+        }
+
+        .badge, .status-badge {
+            display: inline-block;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .badge {
+            background: var(--primary-soft);
+            color: var(--primary);
+        }
+
+        .status-badge {
+            background: #f1f5f9;
+            color: var(--muted);
+        }
+
+        .category-list {
+            display: grid;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .category-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            background: #f8fafc;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+        }
+
+        .category-item span:first-child {
+            color: var(--muted);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 0.94rem;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px 10px;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            color: var(--muted);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        td small {
+            color: var(--muted);
+        }
+
+        .empty-state {
+            padding: 18px;
+            text-align: center;
+            color: var(--muted);
+            border: 1px dashed var(--line);
+            border-radius: 14px;
+            background: #f8fafc;
+        }
+
+        @media (max-width: 900px) {
+            .hero, .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
-<div class="container">
-    <header>
-        <div>
-            <h1>CivicPulse</h1>
-            <p>Understanding Communities, Building Better Cities — SDG 11</p>
-        </div>
-        <div>
+    <div class="container">
+        <header class="topbar">
+            <div class="brand">
+                <h1>CivicPulse</h1>
+                <p>Understanding Communities, Building Better Cities — SDG 11</p>
+            </div>
             {% if session.get('role') == 'admin' %}
-                <a href="{{ url_for('admin_dashboard') }}" class="nav-btn">Dashboard Admin ({{ session.get('user_name') }})</a>
+                <a href="{{ url_for('admin_dashboard') }}" class="nav-btn">Dashboard Admin</a>
             {% else %}
                 <a href="{{ url_for('login') }}" class="nav-btn">Login Admin</a>
             {% endif %}
+        </header>
+
+        <section class="hero">
+            <div class="hero-copy">
+                <span class="eyebrow">Pengaduan Kota</span>
+                <h2>Laporkan persoalan kota dengan cepat dan akurat.</h2>
+                <p>
+                    CivicPulse membantu masyarakat menyampaikan isu lingkungan, infrastruktur, dan fasilitas publik.
+                    Sistem kami menggunakan klasifikasi AI untuk mengelompokkan laporan agar penanganan lebih cepat dan terstruktur.
+                </p>
+                <div class="hero-actions">
+                    <a href="#lapor" class="primary-btn">Ajukan Laporan</a>
+                    <a href="#riwayat" class="secondary-btn">Lihat Riwayat</a>
+                </div>
+            </div>
+
+            <div class="hero-panel">
+                <h3>Ikhtisar Cepat</h3>
+                <div class="stats-grid">
+                    {% set total = 0 %}
+                    {% for item in statistik %}
+                        {% set total = total + item.total %}
+                    {% endfor %}
+                    <div class="stat-box">
+                        <span>Total Laporan</span>
+                        <strong>{{ total }}</strong>
+                    </div>
+                    <div class="stat-box">
+                        <span>Verifikasi</span>
+                        <strong>{{ statistik|length }}</strong>
+                    </div>
+                    <div class="stat-box">
+                        <span>Admin</span>
+                        <strong>1</strong>
+                    </div>
+                    <div class="stat-box">
+                        <span>Status</span>
+                        <strong>Aktif</strong>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {% if hasil %}
+        <div class="alert">
+            <strong>Laporan berhasil dikirim dan diklasifikasikan oleh AI.</strong><br>
+            Judul: {{ hasil.judul }}<br>
+            Kategori terdeteksi: <span class="badge">{{ hasil.nama_kategori }}</span>
+            &nbsp; | Confidence score: <strong>{{ hasil.confidence }}%</strong>
+            &nbsp; | Status: <strong>{{ hasil.status }}</strong>
         </div>
-    </header>
+        {% endif %}
 
-    {% if hasil %}
-    <div class="alert">
-        <strong>Laporan Berhasil Dikirim & Diklasifikasikan oleh AI:</strong><br>
-        Judul: {{ hasil.judul }}<br>
-        Kategori Terdeteksi: <span class="badge">{{ hasil.nama_kategori }}</span>
-        | Confidence Score: <strong>{{ hasil.confidence }}%</strong>
-        | Status: <strong>{{ hasil.status }}</strong>
+        <div class="main-grid">
+            <div class="card" id="lapor">
+                <h3>Sampaikan Pengaduan Lingkungan & Fasilitas Kota</h3>
+                <form method="POST">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="reporter_name">Nama Pelapor</label>
+                            <input id="reporter_name" type="text" name="reporter_name" placeholder="Contoh: Budi Santoso" required>
+                        </div>
+                        <div class="field">
+                            <label for="area">Wilayah / Kecamatan</label>
+                            <input id="area" type="text" name="area" placeholder="Contoh: Kec. Kambu">
+                        </div>
+                        <div class="field full">
+                            <label for="title">Judul Permasalahan</label>
+                            <input id="title" type="text" name="title" placeholder="Contoh: Lampu jalan mati dan jalan berlubang" required>
+                        </div>
+                        <div class="field full">
+                            <label for="description">Deskripsi Lengkap</label>
+                            <textarea id="description" name="description" placeholder="Jelaskan detail kondisi permasalahan di lapangan..." required></textarea>
+                        </div>
+                    </div>
+                    <button type="submit" class="submit-btn">Kirim Pengaduan</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>Distribusi Kategori</h3>
+                <div class="category-list">
+                    {% if statistik %}
+                        {% for item in statistik %}
+                        <div class="category-item">
+                            <span>{{ label_map.get(item.kategori, item.kategori) }}</span>
+                            <strong>{{ item.total }}</strong>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="empty-state">Belum ada data kategori.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card" id="riwayat" style="margin-top: 28px;">
+            <h3>Pantauan Riwayat Pengaduan Terkini</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Waktu</th>
+                        <th>Permasalahan</th>
+                        <th>Kategori</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in laporan %}
+                    <tr>
+                        <td><small>{{ item.created_at }}</small></td>
+                        <td>
+                            <strong>{{ item.title }}</strong><br>
+                            <small>{{ item.area or 'Umum' }}</small>
+                        </td>
+                        <td><span class="badge">{{ label_map.get(item.verified_category or item.predicted_category, item.predicted_category) }}</span></td>
+                        <td><span class="status-badge">{{ item.status }}</span></td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4">
+                            <div class="empty-state">Belum ada laporan pengaduan yang masuk.</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
-    {% endif %}
-
-    <div class="card">
-        <h2>Sampaikan Pengaduan Lingkungan & Fasilitas Kota</h2>
-        <form method="POST">
-            <label>Nama Pelapor</label>
-            <input type="text" name="reporter_name" placeholder="Contoh: Budi Santoso" required>
-
-            <label>Wilayah / Kecamatan</label>
-            <input type="text" name="area" placeholder="Contoh: Kec. Kambu">
-
-            <label>Judul Permasalahan</label>
-            <input type="text" name="title" placeholder="Contoh: Lampu jalan mati dan jalan berlubang" required>
-
-            <label>Deskripsi Lengkap</label>
-            <textarea name="description" rows="4" placeholder="Jelaskan detail kondisi permasalahan di lapangan..." required></textarea>
-
-            <button type="submit">Kirim Pengaduan</button>
-        </form>
-    </div>
-
-    <div class="card">
-        <h2>Pantauan Riwayat Pengaduan Terkini</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Waktu</th>
-                    <th>Permasalahan</th>
-                    <th>Kategori</th>
-                    <th>Status Penanganan</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in laporan %}
-                <tr>
-                    <td><small>{{ item.created_at }}</small></td>
-                    <td>
-                        <strong>{{ item.title }}</strong> <small>({{ item.area or 'Umum' }})</small><br>
-                        <span>{{ item.description }}</span>
-                    </td>
-                    <td>
-                        <span class="badge">{{ label_map.get(item.verified_category or item.predicted_category, item.predicted_category) }}</span>
-                    </td>
-                    <td>
-                        <span class="status-badge">{{ item.status }}</span>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="4">Belum ada laporan pengaduan yang masuk.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
 </body>
 </html>
