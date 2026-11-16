@@ -1,11 +1,14 @@
+import hmac
+import math
 import os
 import re
+import secrets
 import sqlite3
 from functools import wraps
 
 import joblib
 import mysql.connector
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -13,7 +16,45 @@ MODEL_PATH = os.path.join(BASE_DIR, "civicpulse_model_final.joblib")
 DB_PATH = os.path.join(BASE_DIR, "civicpulse.db")
 
 app = Flask(__name__)
-app.secret_key = "civicpulse-sdg11-secret-key-ubah-saat-produksi"
+secret_key = os.getenv("FLASK_SECRET_KEY")
+if not secret_key:
+    if os.getenv("FLASK_ENV", "").lower() == "production":
+        raise RuntimeError("FLASK_SECRET_KEY harus dikonfigurasi untuk production.")
+    secret_key = secrets.token_urlsafe(32)
+elif len(secret_key) < 32:
+    raise RuntimeError("FLASK_SECRET_KEY harus memiliki panjang minimal 32 karakter.")
+app.secret_key = secret_key
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv(
+        "SESSION_COOKIE_SECURE",
+        "true" if os.getenv("FLASK_ENV", "").lower() == "production" else "false",
+    ).lower() in {"1", "true", "yes"},
+)
+
+
+def create_csrf_token():
+    token = session.get("_csrf_token")
+    if token is None:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+@app.context_processor
+def inject_csrf_token():
+    return {"csrf_token": create_csrf_token}
+
+
+@app.before_request
+def protect_post_requests():
+    if request.method == "POST":
+        submitted_token = request.form.get("csrf_token", "")
+        session_token = session.get("_csrf_token", "")
+        if not submitted_token or not session_token or not hmac.compare_digest(submitted_token, session_token):
+            abort(400)
+
 
 # Muat model NLP sekali saat server menyala
 model = joblib.load(MODEL_PATH)
@@ -34,33 +75,32 @@ def get_db_connection():
     mysql_database = os.getenv("MYSQL_DATABASE", "civicpulse_db")
 
     if mysql_host:
-        try:
-            conn = mysql.connector.connect(
-                host=mysql_host,
-                user=mysql_user,
-                password=mysql_password,
-                database=mysql_database,
-                port=int(os.getenv("MYSQL_PORT", "3306")),
-            )
-            return conn
-        except mysql.connector.Error:
-            pass
+        return mysql.connector.connect(
+            host=mysql_host,
+            user=mysql_user,
+            password=mysql_password,
+            database=mysql_database,
+            port=int(os.getenv("MYSQL_PORT", "3306")),
+        )
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def parse_nullable_float(value):
-    if value is None or value == "":
+def parse_nullable_float(value, minimum, maximum):
+    if value is None or value.strip() == "":
         return None
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        return None
+    return number
 
 
-def normalize_geo_rows(rows):
+def normalize_geo_rows(rows, include_reporter=False):
     geo_rows = []
     for row in rows:
         latitude = row.get("latitude")
@@ -74,17 +114,21 @@ def normalize_geo_rows(rows):
             lng = float(longitude)
         except (TypeError, ValueError):
             continue
+        if not math.isfinite(lat) or not math.isfinite(lng) or not -90 <= lat <= 90 or not -180 <= lng <= 180:
+            continue
 
-        geo_rows.append({
+        geo_row = {
             "id": row.get("id"),
             "title": row.get("title"),
-            "reporter_name": row.get("reporter_name"),
             "area": row.get("area"),
             "latitude": lat,
             "longitude": lng,
             "kategori": row.get("verified_category") or row.get("predicted_category"),
             "status": row.get("status"),
-        })
+        }
+        if include_reporter:
+            geo_row["reporter_name"] = row.get("reporter_name")
+        geo_rows.append(geo_row)
     return geo_rows
 
 
@@ -106,7 +150,8 @@ def setup_database():
                     status TEXT DEFAULT 'Menunggu Verifikasi',
                     latitude REAL,
                     longitude REAL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -117,7 +162,8 @@ def setup_database():
                     name TEXT NOT NULL,
                     email TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'admin'
+                    role TEXT NOT NULL DEFAULT 'admin',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -126,6 +172,52 @@ def setup_database():
                 conn.execute("ALTER TABLE complaints ADD COLUMN latitude REAL")
             if "longitude" not in columns:
                 conn.execute("ALTER TABLE complaints ADD COLUMN longitude REAL")
+            if "updated_at" not in columns:
+                conn.execute("ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP")
+                conn.execute("UPDATE complaints SET updated_at = created_at WHERE updated_at IS NULL")
+            user_columns = [row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
+            if "created_at" not in user_columns:
+                conn.execute("ALTER TABLE users ADD COLUMN created_at TIMESTAMP")
+                conn.execute("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS complaints_set_updated_at_on_insert
+                AFTER INSERT ON complaints
+                FOR EACH ROW
+                WHEN NEW.updated_at IS NULL
+                BEGIN
+                    UPDATE complaints
+                    SET updated_at = CURRENT_TIMESTAMP
+                    WHERE id = NEW.id;
+                END
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS complaints_updated_at
+                AFTER UPDATE ON complaints
+                FOR EACH ROW
+                WHEN NEW.updated_at = OLD.updated_at
+                BEGIN
+                    UPDATE complaints
+                    SET updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+                    WHERE id = NEW.id;
+                END
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS users_set_created_at_on_insert
+                AFTER INSERT ON users
+                FOR EACH ROW
+                WHEN NEW.created_at IS NULL
+                BEGIN
+                    UPDATE users
+                    SET created_at = CURRENT_TIMESTAMP
+                    WHERE id = NEW.id;
+                END
+                """
+            )
         else:
             cursor = conn.cursor()
             cursor.execute(
@@ -142,7 +234,8 @@ def setup_database():
                     status ENUM('Menunggu Verifikasi', 'Terverifikasi', 'Dalam Tindak Lanjut', 'Selesai') DEFAULT 'Menunggu Verifikasi',
                     latitude DECIMAL(10,7) NULL,
                     longitude DECIMAL(10,7) NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -153,7 +246,8 @@ def setup_database():
                     name VARCHAR(100) NOT NULL,
                     email VARCHAR(150) NOT NULL UNIQUE,
                     password_hash VARCHAR(255) NOT NULL,
-                    role VARCHAR(30) NOT NULL DEFAULT 'admin'
+                    role VARCHAR(30) NOT NULL DEFAULT 'admin',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -166,6 +260,17 @@ def setup_database():
             if cursor.fetchone() is None:
                 cursor.execute("ALTER TABLE complaints ADD COLUMN longitude DECIMAL(10,7) NULL")
 
+            cursor.execute("SHOW COLUMNS FROM complaints LIKE 'updated_at'")
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    "ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP "
+                    "DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+                )
+
+            cursor.execute("SHOW COLUMNS FROM users LIKE 'created_at'")
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+
             conn.commit()
             cursor.close()
         conn.commit()
@@ -174,28 +279,51 @@ def setup_database():
 
 
 def init_default_admin():
-    """Membuat akun admin bawaan otomatis jika tabel users masih kosong."""
+    """Create the initial admin only when an explicit password is configured."""
+    admin_password = os.getenv("CIVICPULSE_ADMIN_PASSWORD")
+    admin_email = os.getenv("CIVICPULSE_ADMIN_EMAIL", "admin@civicpulse.id")
+    admin_name = os.getenv("CIVICPULSE_ADMIN_NAME", "Administrator CivicPulse")
+    if admin_password is not None and len(admin_password) < 12:
+        raise RuntimeError("CIVICPULSE_ADMIN_PASSWORD harus memiliki panjang minimal 12 karakter.")
     conn = get_db_connection()
     try:
         if isinstance(conn, sqlite3.Connection):
             cursor = conn.cursor()
-            cursor.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+            cursor.execute("SELECT id, password_hash FROM users WHERE role = 'admin' LIMIT 1")
             admin_ada = cursor.fetchone()
             if not admin_ada:
+                if not admin_password:
+                    app.logger.warning("Admin belum dibuat; set CIVICPULSE_ADMIN_PASSWORD untuk inisialisasi.")
+                    return
                 cursor.execute(
                     "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
-                    ("Administrator CivicPulse", "admin@civicpulse.id", generate_password_hash("admin123"), "admin"),
+                    (admin_name, admin_email, generate_password_hash(admin_password), "admin"),
+                )
+                conn.commit()
+            elif admin_password:
+                cursor.execute(
+                    "UPDATE users SET password_hash = ? WHERE id = ?",
+                    (generate_password_hash(admin_password), admin_ada["id"]),
                 )
                 conn.commit()
             cursor.close()
         else:
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+            cursor.execute("SELECT id, password_hash FROM users WHERE role = 'admin' LIMIT 1")
             admin_ada = cursor.fetchone()
             if not admin_ada:
+                if not admin_password:
+                    app.logger.warning("Admin belum dibuat; set CIVICPULSE_ADMIN_PASSWORD untuk inisialisasi.")
+                    return
                 cursor.execute(
                     "INSERT INTO users (name, email, password_hash, role) VALUES (%s, %s, %s, %s)",
-                    ("Administrator CivicPulse", "admin@civicpulse.id", generate_password_hash("admin123"), "admin"),
+                    (admin_name, admin_email, generate_password_hash(admin_password), "admin"),
+                )
+                conn.commit()
+            elif admin_password:
+                cursor.execute(
+                    "UPDATE users SET password_hash = %s WHERE id = %s",
+                    (generate_password_hash(admin_password), admin_ada["id"]),
                 )
                 conn.commit()
             cursor.close()
@@ -222,6 +350,7 @@ def bersihkan_input(teks):
 
 # Inisialisasi database saat import agar tabel selalu ada.
 setup_database()
+init_default_admin()
 
 
 # ==========================================================
@@ -236,8 +365,14 @@ def index():
         judul = request.form.get("title", "").strip()
         deskripsi = request.form.get("description", "").strip()
         area = request.form.get("area", "").strip()
-        latitude = parse_nullable_float(request.form.get("latitude"))
-        longitude = parse_nullable_float(request.form.get("longitude"))
+        raw_latitude = request.form.get("latitude", "")
+        raw_longitude = request.form.get("longitude", "")
+        latitude = parse_nullable_float(raw_latitude, -90, 90)
+        longitude = parse_nullable_float(raw_longitude, -180, 180)
+        if (raw_latitude or raw_longitude) and (latitude is None or longitude is None):
+            latitude = None
+            longitude = None
+            flash("Koordinat tidak valid; laporan disimpan tanpa titik peta.", "warning")
 
         teks_gabungan = bersihkan_input(f"{judul}. {deskripsi}")
         probs = model.predict_proba([teks_gabungan])[0]
@@ -300,6 +435,15 @@ def index():
                 """
             )
             statistik = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT *
+                FROM complaints
+                WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+                ORDER BY created_at DESC
+                """
+            )
+            laporan_geo_rows = [dict(row) for row in cursor.fetchall()]
             cursor.close()
         else:
             cursor = conn.cursor(dictionary=True)
@@ -320,11 +464,20 @@ def index():
                 """
             )
             statistik = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT *
+                FROM complaints
+                WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+                ORDER BY created_at DESC
+                """
+            )
+            laporan_geo_rows = cursor.fetchall()
             cursor.close()
     finally:
         conn.close()
 
-    laporan_geo = normalize_geo_rows(daftar_laporan)
+    laporan_geo = normalize_geo_rows(laporan_geo_rows)
 
     return render_template(
         "index.html",
@@ -372,6 +525,8 @@ def login():
             conn.close()
 
         if user and check_password_hash(user["password_hash"], password):
+            session.clear()
+            session["_csrf_token"] = secrets.token_urlsafe(32)
             session["user_id"] = user["id"]
             session["user_name"] = user["name"]
             session["role"] = user["role"]
@@ -381,7 +536,7 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
     session.clear()
     flash("Anda telah keluar dari sesi administrator.", "info")
@@ -437,7 +592,7 @@ def admin_dashboard():
         laporan=semua_laporan,
         statistik=statistik,
         ringkasan=ringkasan_status,
-        laporan_geo=normalize_geo_rows(semua_laporan),
+        laporan_geo=normalize_geo_rows(semua_laporan, include_reporter=True),
         label_map=LABEL_TAMPILAN,
     )
 
@@ -445,8 +600,19 @@ def admin_dashboard():
 @app.route("/admin/verifikasi/<int:complaint_id>", methods=["POST"])
 @admin_required
 def verifikasi_laporan(complaint_id):
-    kategori_baru = request.form.get("verified_category")
+    kategori_baru = request.form.get("verified_category") or None
     status_baru = request.form.get("status", "Terverifikasi")
+    allowed_statuses = {
+        "Menunggu Verifikasi",
+        "Terverifikasi",
+        "Dalam Tindak Lanjut",
+        "Selesai",
+    }
+
+    if kategori_baru is not None and kategori_baru not in LABEL_TAMPILAN:
+        abort(400)
+    if status_baru not in allowed_statuses:
+        abort(400)
 
     conn = get_db_connection()
     try:
@@ -478,5 +644,5 @@ def verifikasi_laporan(complaint_id):
 
 
 if __name__ == "__main__":
-    init_default_admin()
-    app.run(debug=True)
+    debug_enabled = os.getenv("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
+    app.run(debug=debug_enabled)
