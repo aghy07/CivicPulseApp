@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CivicPulse</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background: #f6f8fb; color: #1f2937; }
+      .container { max-width: 1100px; margin: 0 auto; }
+      .card { background: white; padding: 1.25rem; margin-bottom: 1.25rem; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+      form { display: grid; gap: 0.9rem; }
+      .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.9rem; }
+      label { display: block; font-weight: bold; margin-bottom: 0.35rem; }
+      input, textarea, select { width: 100%; padding: 0.7rem; border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; }
+      textarea { min-height: 120px; resize: vertical; }
+      button { background: #0f766e; color: white; border: none; border-radius: 8px; padding: 0.8rem 1rem; font-weight: bold; cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #e5e7eb; padding: 0.7rem; text-align: left; }
+      .badge { display: inline-block; padding: 0.35rem 0.6rem; border-radius: 999px; background: #ecfeff; color: #0f172a; font-size: 0.75rem; }
+      .success { color: #166534; }
+      .warn { color: #92400e; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>CivicPulse</h1>
+
+      <div class="card">
+        <h2>Form Laporan</h2>
+        <form method="post">
+          <div class="row">
+            <div>
+              <label for="reporter_name">Nama Pelapor</label>
+              <input id="reporter_name" name="reporter_name" required>
+            </div>
+            <div>
+              <label for="title">Judul</label>
+              <input id="title" name="title" required>
+            </div>
+            <div>
+              <label for="area">Area</label>
+              <input id="area" name="area">
+            </div>
+          </div>
+          <div>
+            <label for="description">Deskripsi</label>
+            <textarea id="description" name="description" required></textarea>
+          </div>
+          <button type="submit">Kirim Laporan</button>
+        </form>
+      </div>
+
+      {% if hasil %}
+      <div class="card">
+        <h2>Hasil Prediksi</h2>
+        <p><strong>Judul:</strong> {{ hasil.judul }}</p>
+        <p><strong>Kategori:</strong> {{ hasil.nama_kategori }} <span class="badge">{{ hasil.kode }}</span></p>
+        <p><strong>Confidence:</strong> {{ hasil.confidence }}%</p>
+        <p><strong>Status:</strong> <span class="{% if hasil.status == 'Terverifikasi' %}success{% else %}warn{% endif %}">{{ hasil.status }}</span></p>
+      </div>
+      {% endif %}
+
+      <div class="card">
+        <h2>Statistik Kategori</h2>
+        {% if statistik %}
+        <table>
+          <thead>
+            <tr>
+              <th>Kategori</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in statistik %}
+            <tr>
+              <td>{{ label_map.get(item.kategori, item.kategori) }}</td>
+              <td>{{ item.total }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Belum ada data.</p>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Riwayat Laporan</h2>
+        {% if laporan %}
+        <table>
+          <thead>
+            <tr>
+              <th>Judul</th>
+              <th>Pelapor</th>
+              <th>Kategori</th>
+              <th>Status</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in laporan %}
+            <tr>
+              <td>{{ item.title }}</td>
+              <td>{{ item.reporter_name }}</td>
+              <td>{{ label_map.get(item.predicted_category, item.predicted_category) }}</td>
+              <td>{{ item.status }}</td>
+              <td>{{ item.confidence_score }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Belum ada laporan.</p>
+        {% endif %}
+      </div>
+    </div>
+  </body>
+</html>
