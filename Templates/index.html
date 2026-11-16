@@ -491,7 +491,7 @@
             const title = document.createElement('strong');
             title.textContent = item.title || 'Laporan';
             const details = document.createElement('div');
-            details.textContent = `${item.reporter_name || 'Pelapor'} · ${item.area || 'Wilayah umum'}`;
+            details.textContent = `${item.area || 'Wilayah umum'}`;
             const category = document.createElement('div');
             category.textContent = categoryLabels[item.kategori] || item.kategori || 'Kategori tidak tersedia';
             content.append(title, details, category);

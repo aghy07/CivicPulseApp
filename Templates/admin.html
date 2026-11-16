@@ -308,8 +308,11 @@
 
         <section class="panel table-panel">
             <div class="panel-heading">
-                <h2>Manajemen dan verifikasi laporan</h2>
-                <span class="panel-note">{{ laporan|length }} laporan</span>
+                <div>
+                    <h2>Manajemen dan verifikasi laporan</h2>
+                    <span class="panel-note">{{ laporan|length }} laporan</span>
+                </div>
+                <a href="{{ url_for('export_csv') }}" class="button secondary" style="background:#fff; color:var(--navy); border:1px solid var(--border); font-size:10px; display:inline-flex; align-items:center; min-height:30px;">Unduh CSV</a>
             </div>
             <div class="filters" aria-label="Filter laporan">
                 <div class="filter-field">
@@ -425,7 +428,19 @@
             category.textContent = categoryLabels[item.kategori] || item.kategori || 'Kategori tidak tersedia';
             const status = document.createElement('div');
             status.textContent = item.status || '';
-            content.append(title, details, category, status);
+
+            const gmaps = document.createElement('a');
+            gmaps.href = `https://www.google.com/maps?q=${encodeURIComponent(item.latitude)},${encodeURIComponent(item.longitude)}`;
+            gmaps.target = '_blank';
+            gmaps.rel = 'noopener noreferrer';
+            gmaps.textContent = 'Buka di Google Maps';
+            gmaps.style.display = 'block';
+            gmaps.style.marginTop = '8px';
+            gmaps.style.fontSize = '10px';
+            gmaps.style.color = 'var(--navy)';
+            gmaps.style.fontWeight = '600';
+
+            content.append(title, details, category, status, gmaps);
             marker.bindPopup(content);
         }
 
@@ -482,11 +497,29 @@
                 filterTimer = window.setTimeout(function () {
                     const selectedCategory = categoryFilter.value;
                     const selectedStatus = statusFilter.value;
+                    let visibleCount = 0;
+
                     rows.forEach(function (row) {
                         const categoryMatches = !selectedCategory || row.dataset.category === selectedCategory;
                         const statusMatches = !selectedStatus || row.dataset.status === selectedStatus;
-                        row.hidden = !(categoryMatches && statusMatches);
+                        const isVisible = categoryMatches && statusMatches;
+                        row.hidden = !isVisible;
+                        if (isVisible) visibleCount++;
                     });
+
+                    let emptyMsg = document.getElementById('filter-empty-msg');
+                    if (visibleCount === 0) {
+                        if (!emptyMsg) {
+                            emptyMsg = document.createElement('tr');
+                            emptyMsg.id = 'filter-empty-msg';
+                            emptyMsg.innerHTML = '<td class="empty-cell" colspan="6">Tidak ada laporan yang sesuai dengan filter terpilih.</td>';
+                            document.getElementById('report-table-body').appendChild(emptyMsg);
+                        }
+                        emptyMsg.hidden = false;
+                    } else if (emptyMsg) {
+                        emptyMsg.hidden = true;
+                    }
+
                     tableWrap.classList.remove('is-filtering', 'skeleton-shimmer');
                 }, 180);
             }

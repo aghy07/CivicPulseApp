@@ -175,6 +175,7 @@ def setup_database():
             if "updated_at" not in columns:
                 conn.execute("ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP")
                 conn.execute("UPDATE complaints SET updated_at = created_at WHERE updated_at IS NULL")
+            conn.execute("UPDATE complaints SET verified_category = NULL WHERE TRIM(verified_category) = ''")
             user_columns = [row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
             if "created_at" not in user_columns:
                 conn.execute("ALTER TABLE users ADD COLUMN created_at TIMESTAMP")
@@ -641,6 +642,65 @@ def verifikasi_laporan(complaint_id):
 
     flash(f"Laporan #{complaint_id} berhasil diperbarui.", "success")
     return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/export-csv")
+@admin_required
+def export_csv():
+    import csv
+    import io
+    from flask import Response
+
+    conn = get_db_connection()
+    try:
+        if isinstance(conn, sqlite3.Connection):
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, title, description, area, predicted_category, confidence_score,
+                       verified_category, COALESCE(verified_category, predicted_category) AS final_category,
+                       status, latitude, longitude, created_at
+                FROM complaints
+                WHERE status != 'Menunggu Verifikasi'
+                ORDER BY created_at DESC
+                """
+            )
+            rows = cursor.fetchall()
+        else:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT id, title, description, area, predicted_category, confidence_score,
+                       verified_category, COALESCE(verified_category, predicted_category) AS final_category,
+                       status, latitude, longitude, created_at
+                FROM complaints
+                WHERE status != 'Menunggu Verifikasi'
+                ORDER BY created_at DESC
+                """
+            )
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "id", "title", "description", "area", "predicted_category",
+        "confidence_score", "verified_category", "final_category",
+        "status", "latitude", "longitude", "created_at"
+    ])
+
+    for row in rows:
+        writer.writerow([
+            row["id"], row["title"], row["description"], row["area"],
+            row["predicted_category"], row["confidence_score"],
+            row["verified_category"], row["final_category"],
+            row["status"], row["latitude"], row["longitude"], row["created_at"]
+        ])
+
+    response = Response(output.getvalue(), mimetype="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=civicpulse_verified_dataset.csv"
+    return response
 
 
 if __name__ == "__main__":
