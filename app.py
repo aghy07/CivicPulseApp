@@ -1,30 +1,21 @@
 import os
 import re
 import sqlite3
-from importlib import import_module
+from functools import wraps
 
 import joblib
-
-flask = import_module("flask")
-Flask = flask.Flask
-redirect = flask.redirect
-render_template = flask.render_template
-request = flask.request
-url_for = flask.url_for
-
-try:
-    mysql_connector = import_module("mysql.connector")
-except ModuleNotFoundError:
-    mysql_connector = None
+import mysql.connector
+from flask import Flask, flash, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "civicpulse_model_final.joblib")
 DB_PATH = os.path.join(BASE_DIR, "civicpulse.db")
 
 app = Flask(__name__)
+app.secret_key = "civicpulse-sdg11-secret-key-ubah-saat-produksi"
 
-# Muat model NLP sekali saat server Flask dijalankan.
-# Model file berada di folder proyek yang sama, jadi path absolut lebih aman.
+# Muat model NLP sekali saat server menyala
 model = joblib.load(MODEL_PATH)
 
 LABEL_TAMPILAN = {
@@ -42,9 +33,9 @@ def get_db_connection():
     mysql_password = os.getenv("MYSQL_PASSWORD", "")
     mysql_database = os.getenv("MYSQL_DATABASE", "civicpulse_db")
 
-    if mysql_host and mysql_connector is not None:
+    if mysql_host:
         try:
-            conn = mysql_connector.connect(
+            conn = mysql.connector.connect(
                 host=mysql_host,
                 user=mysql_user,
                 password=mysql_password,
@@ -52,7 +43,7 @@ def get_db_connection():
                 port=int(os.getenv("MYSQL_PORT", "3306")),
             )
             return conn
-        except mysql_connector.Error:
+        except mysql.connector.Error:
             pass
 
     conn = sqlite3.connect(DB_PATH)
@@ -80,7 +71,17 @@ def setup_database():
                 )
                 """
             )
-            conn.commit()
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'admin'
+                )
+                """
+            )
         else:
             cursor = conn.cursor()
             cursor.execute(
@@ -99,13 +100,63 @@ def setup_database():
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    email VARCHAR(150) NOT NULL UNIQUE,
+                    password_hash VARCHAR(255) NOT NULL,
+                    role VARCHAR(30) NOT NULL DEFAULT 'admin'
+                )
+                """
+            )
             conn.commit()
+            cursor.close()
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def init_default_admin():
+    """Membuat akun admin bawaan otomatis jika tabel users masih kosong."""
+    conn = get_db_connection()
+    try:
+        if isinstance(conn, sqlite3.Connection):
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+            admin_ada = cursor.fetchone()
+            if not admin_ada:
+                cursor.execute(
+                    "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+                    ("Administrator CivicPulse", "admin@civicpulse.id", generate_password_hash("admin123"), "admin"),
+                )
+                conn.commit()
+            cursor.close()
+        else:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+            admin_ada = cursor.fetchone()
+            if not admin_ada:
+                cursor.execute(
+                    "INSERT INTO users (name, email, password_hash, role) VALUES (%s, %s, %s, %s)",
+                    ("Administrator CivicPulse", "admin@civicpulse.id", generate_password_hash("admin123"), "admin"),
+                )
+                conn.commit()
             cursor.close()
     finally:
         conn.close()
 
 
-setup_database()
+def admin_required(f):
+    """Dekorator untuk melindungi rute khusus administrator."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session or session.get("role") != "admin":
+            flash("Silakan login sebagai administrator untuk mengakses dashboard.", "warning")
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def bersihkan_input(teks):
@@ -114,6 +165,13 @@ def bersihkan_input(teks):
     return teks
 
 
+# Inisialisasi database saat import agar tabel selalu ada.
+setup_database()
+
+
+# ==========================================================
+# 1. HALAMAN MASYARAKAT (PUBLIK)
+# ==========================================================
 @app.route("/", methods=["GET", "POST"])
 def index():
     hasil_prediksi = None
@@ -159,7 +217,6 @@ def index():
 
         hasil_prediksi = {
             "judul": judul,
-            "kode": kode_kategori,
             "nama_kategori": LABEL_TAMPILAN.get(kode_kategori, kode_kategori),
             "confidence": confidence,
             "status": status_awal,
@@ -167,11 +224,91 @@ def index():
 
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
         if isinstance(conn, sqlite3.Connection):
-            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 20")
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15")
             daftar_laporan = [dict(row) for row in cursor.fetchall()]
+            cursor.close()
+        else:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15")
+            daftar_laporan = cursor.fetchall()
+            cursor.close()
+    finally:
+        conn.close()
 
+    return render_template(
+        "index.html",
+        hasil=hasil_prediksi,
+        laporan=daftar_laporan,
+        label_map=LABEL_TAMPILAN,
+    )
+
+
+# ==========================================================
+# 2. AUTENTIKASI ADMINISTRATOR (LOGIN & LOGOUT)
+# ==========================================================
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if "user_id" in session and session.get("role") == "admin":
+        return redirect(url_for("admin_dashboard"))
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip()
+        password = request.form.get("password", "")
+
+        conn = get_db_connection()
+        try:
+            if isinstance(conn, sqlite3.Connection):
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM users WHERE email = ? LIMIT 1", (email,))
+                user = cursor.fetchone()
+                if user:
+                    user = {
+                        "id": user[0],
+                        "name": user[1],
+                        "email": user[2],
+                        "password_hash": user[3],
+                        "role": user[4],
+                    }
+                cursor.close()
+            else:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
+                user = cursor.fetchone()
+                cursor.close()
+        finally:
+            conn.close()
+
+        if user and check_password_hash(user["password_hash"], password):
+            session["user_id"] = user["id"]
+            session["user_name"] = user["name"]
+            session["role"] = user["role"]
+            return redirect(url_for("admin_dashboard"))
+        flash("Email atau kata sandi salah.", "danger")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash("Anda telah keluar dari sesi administrator.", "info")
+    return redirect(url_for("login"))
+
+
+# ==========================================================
+# 3. DASHBOARD & VERIFIKASI ADMINISTRATOR (TERPROTEKSI)
+# ==========================================================
+@app.route("/admin")
+@admin_required
+def admin_dashboard():
+    conn = get_db_connection()
+    try:
+        if isinstance(conn, sqlite3.Connection):
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC")
+            semua_laporan = [dict(row) for row in cursor.fetchall()]
             cursor.execute(
                 """
                 SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total
@@ -180,10 +317,11 @@ def index():
                 """
             )
             statistik = [dict(row) for row in cursor.fetchall()]
+            cursor.close()
         else:
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 20")
-            daftar_laporan = cursor.fetchall()
+            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC")
+            semua_laporan = cursor.fetchall()
             cursor.execute(
                 """
                 SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total
@@ -192,21 +330,30 @@ def index():
                 """
             )
             statistik = cursor.fetchall()
+            cursor.close()
     finally:
         conn.close()
 
+    ringkasan_status = {
+        "total": len(semua_laporan),
+        "menunggu": sum(1 for r in semua_laporan if r["status"] == "Menunggu Verifikasi"),
+        "proses": sum(1 for r in semua_laporan if r["status"] in ["Terverifikasi", "Dalam Tindak Lanjut"]),
+        "selesai": sum(1 for r in semua_laporan if r["status"] == "Selesai"),
+    }
+
     return render_template(
-        "index.html",
-        hasil=hasil_prediksi,
-        laporan=daftar_laporan,
+        "admin.html",
+        laporan=semua_laporan,
         statistik=statistik,
+        ringkasan=ringkasan_status,
         label_map=LABEL_TAMPILAN,
     )
 
 
-@app.route("/verifikasi/<int:complaint_id>", methods=["POST"])
+@app.route("/admin/verifikasi/<int:complaint_id>", methods=["POST"])
+@admin_required
 def verifikasi_laporan(complaint_id):
-    kategori_baru = request.form.get("verified_category") or None
+    kategori_baru = request.form.get("verified_category")
     status_baru = request.form.get("status", "Terverifikasi")
 
     conn = get_db_connection()
@@ -233,8 +380,11 @@ def verifikasi_laporan(complaint_id):
         conn.commit()
     finally:
         conn.close()
-    return redirect(url_for("index"))
+
+    flash(f"Laporan #{complaint_id} berhasil diperbarui.", "success")
+    return redirect(url_for("admin_dashboard"))
 
 
 if __name__ == "__main__":
+    init_default_admin()
     app.run(debug=True)
