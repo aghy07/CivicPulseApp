@@ -11,9 +11,10 @@ CREATE TABLE IF NOT EXISTS complaints (
     confidence_score DECIMAL(5,2) NOT NULL,
     verified_category VARCHAR(50) DEFAULT NULL,
     status ENUM('Menunggu Verifikasi', 'Terverifikasi', 'Dalam Tindak Lanjut', 'Selesai') DEFAULT 'Menunggu Verifikasi',
+    latitude DECIMAL(10,7) NULL,
+    longitude DECIMAL(10,7) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-USE civicpulse_db;
 
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -24,7 +25,6 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tambahkan kolom user_id jika tabel complaints sebelumnya sudah dibuat
 ALTER TABLE complaints
-ADD COLUMN IF NOT EXISTS user_id INT NULL AFTER id,
-ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+    ADD COLUMN IF NOT EXISTS latitude DECIMAL(10,7) NULL AFTER status,
+    ADD COLUMN IF NOT EXISTS longitude DECIMAL(10,7) NULL AFTER latitude;

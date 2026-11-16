@@ -51,6 +51,43 @@ def get_db_connection():
     return conn
 
 
+def parse_nullable_float(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_geo_rows(rows):
+    geo_rows = []
+    for row in rows:
+        latitude = row.get("latitude")
+        longitude = row.get("longitude")
+
+        if latitude is None or longitude is None:
+            continue
+
+        try:
+            lat = float(latitude)
+            lng = float(longitude)
+        except (TypeError, ValueError):
+            continue
+
+        geo_rows.append({
+            "id": row.get("id"),
+            "title": row.get("title"),
+            "reporter_name": row.get("reporter_name"),
+            "area": row.get("area"),
+            "latitude": lat,
+            "longitude": lng,
+            "kategori": row.get("verified_category") or row.get("predicted_category"),
+            "status": row.get("status"),
+        })
+    return geo_rows
+
+
 def setup_database():
     conn = get_db_connection()
     try:
@@ -67,6 +104,8 @@ def setup_database():
                     confidence_score REAL NOT NULL,
                     verified_category TEXT,
                     status TEXT DEFAULT 'Menunggu Verifikasi',
+                    latitude REAL,
+                    longitude REAL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
@@ -82,6 +121,11 @@ def setup_database():
                 )
                 """
             )
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(complaints)").fetchall()]
+            if "latitude" not in columns:
+                conn.execute("ALTER TABLE complaints ADD COLUMN latitude REAL")
+            if "longitude" not in columns:
+                conn.execute("ALTER TABLE complaints ADD COLUMN longitude REAL")
         else:
             cursor = conn.cursor()
             cursor.execute(
@@ -96,6 +140,8 @@ def setup_database():
                     confidence_score DECIMAL(5,2) NOT NULL,
                     verified_category VARCHAR(50) DEFAULT NULL,
                     status ENUM('Menunggu Verifikasi', 'Terverifikasi', 'Dalam Tindak Lanjut', 'Selesai') DEFAULT 'Menunggu Verifikasi',
+                    latitude DECIMAL(10,7) NULL,
+                    longitude DECIMAL(10,7) NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
@@ -111,6 +157,15 @@ def setup_database():
                 )
                 """
             )
+
+            cursor.execute("SHOW COLUMNS FROM complaints LIKE 'latitude'")
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE complaints ADD COLUMN latitude DECIMAL(10,7) NULL")
+
+            cursor.execute("SHOW COLUMNS FROM complaints LIKE 'longitude'")
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE complaints ADD COLUMN longitude DECIMAL(10,7) NULL")
+
             conn.commit()
             cursor.close()
         conn.commit()
@@ -181,6 +236,8 @@ def index():
         judul = request.form.get("title", "").strip()
         deskripsi = request.form.get("description", "").strip()
         area = request.form.get("area", "").strip()
+        latitude = parse_nullable_float(request.form.get("latitude"))
+        longitude = parse_nullable_float(request.form.get("longitude"))
 
         teks_gabungan = bersihkan_input(f"{judul}. {deskripsi}")
         probs = model.predict_proba([teks_gabungan])[0]
@@ -197,19 +254,19 @@ def index():
                 cursor.execute(
                     """
                     INSERT INTO complaints
-                    (reporter_name, title, description, area, predicted_category, confidence_score, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (reporter_name, title, description, area, predicted_category, confidence_score, status, latitude, longitude)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (nama, judul, deskripsi, area, kode_kategori, confidence, status_awal),
+                    (nama, judul, deskripsi, area, kode_kategori, confidence, status_awal, latitude, longitude),
                 )
             else:
                 cursor.execute(
                     """
                     INSERT INTO complaints
-                    (reporter_name, title, description, area, predicted_category, confidence_score, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (reporter_name, title, description, area, predicted_category, confidence_score, status, latitude, longitude)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (nama, judul, deskripsi, area, kode_kategori, confidence, status_awal),
+                    (nama, judul, deskripsi, area, kode_kategori, confidence, status_awal, latitude, longitude),
                 )
             conn.commit()
         finally:
@@ -226,7 +283,14 @@ def index():
     try:
         if isinstance(conn, sqlite3.Connection):
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15")
+            cursor.execute(
+                """
+                SELECT *
+                FROM complaints
+                ORDER BY created_at DESC
+                LIMIT 15
+                """
+            )
             daftar_laporan = [dict(row) for row in cursor.fetchall()]
             cursor.execute(
                 """
@@ -239,7 +303,14 @@ def index():
             cursor.close()
         else:
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15")
+            cursor.execute(
+                """
+                SELECT *
+                FROM complaints
+                ORDER BY created_at DESC
+                LIMIT 15
+                """
+            )
             daftar_laporan = cursor.fetchall()
             cursor.execute(
                 """
@@ -253,11 +324,14 @@ def index():
     finally:
         conn.close()
 
+    laporan_geo = normalize_geo_rows(daftar_laporan)
+
     return render_template(
         "index.html",
         hasil=hasil_prediksi,
         laporan=daftar_laporan,
         statistik=statistik,
+        laporan_geo=laporan_geo,
         label_map=LABEL_TAMPILAN,
     )
 
@@ -363,6 +437,7 @@ def admin_dashboard():
         laporan=semua_laporan,
         statistik=statistik,
         ringkasan=ringkasan_status,
+        laporan_geo=normalize_geo_rows(semua_laporan),
         label_map=LABEL_TAMPILAN,
     )
 

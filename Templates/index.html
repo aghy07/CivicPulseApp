@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CivicPulse — Pengaduan Masyarakat Perkotaan</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <style>
         :root {
             --bg: #f3f7ff;
@@ -187,6 +188,86 @@
 
         .card {
             padding: 24px;
+        }
+
+        .location-picker {
+            margin-top: 22px;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: #f8fafc;
+            padding: 14px;
+        }
+
+        .location-picker-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .map-shell {
+            width: 100%;
+            height: 280px;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 1px solid var(--line);
+        }
+
+        #location-picker-map, #public-complaint-map {
+            width: 100%;
+            height: 100%;
+            background: #e2e8f0;
+        }
+
+        .map-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 12px;
+        }
+
+        .map-btn {
+            border: 1px solid var(--line);
+            background: white;
+            color: var(--text);
+            border-radius: 10px;
+            padding: 9px 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .coord-readout {
+            margin-top: 8px;
+            display: inline-block;
+            color: var(--muted);
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .map-panel {
+            width: 100%;
+            height: 380px;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+
+        .custom-div-icon {
+            background: transparent;
+            border: none;
+        }
+
+        .custom-div-icon span {
+            display: block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.9);
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
         }
 
         h3 {
@@ -443,6 +524,22 @@
                             <textarea id="description" name="description" placeholder="Jelaskan detail kondisi permasalahan di lapangan..." required></textarea>
                         </div>
                     </div>
+
+                    <div class="location-picker">
+                        <div class="location-picker-header">
+                            <strong>Lokasi Kejadian</strong>
+                            <span class="coord-readout" id="selected-coordinates">Belum ada titik dipilih</span>
+                        </div>
+                        <div class="map-shell">
+                            <div id="location-picker-map" aria-label="Peta pemilih lokasi"></div>
+                        </div>
+                        <div class="map-actions">
+                            <button type="button" class="map-btn" id="use-location-btn">Gunakan Lokasi Saya</button>
+                            <input type="hidden" name="latitude" id="latitude" value="">
+                            <input type="hidden" name="longitude" id="longitude" value="">
+                        </div>
+                    </div>
+
                     <button type="submit" class="submit-btn">Kirim Pengaduan</button>
                 </form>
             </div>
@@ -461,6 +558,13 @@
                         <div class="empty-state">Belum ada data kategori.</div>
                     {% endif %}
                 </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 28px;">
+            <h3>Peta Sebaran Pengaduan Kota</h3>
+            <div class="map-panel">
+                <div id="public-complaint-map" aria-label="Peta sebaran laporan"></div>
             </div>
         </div>
 
@@ -497,5 +601,118 @@
             </table>
         </div>
     </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        const defaultCenter = [-3.9985, 122.5129];
+        const markerColors = {
+            jalan_rusak: '#dc2626',
+            kebersihan_dan_drainase: '#ea580c',
+            taman_penataan_lingkungan: '#16a34a',
+            utilitas_air_pdam: '#0284c7',
+            utilitas_listrik: '#f59e0b'
+        };
+        const geoData = {{ laporan_geo|tojson|safe }};
+
+        function formatCoordText(lat, lng) {
+            return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+        }
+
+        function makeMarkerIcon(color) {
+            return L.divIcon({
+                className: 'custom-div-icon',
+                html: `<span style="background:${color};"></span>`,
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const latInput = document.getElementById('latitude');
+            const lngInput = document.getElementById('longitude');
+            const coordReadout = document.getElementById('selected-coordinates');
+            const pickerMap = L.map('location-picker-map').setView(defaultCenter, 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(pickerMap);
+
+            const pickerMarker = L.marker(defaultCenter, { draggable: true }).addTo(pickerMap);
+
+            function syncSelection(lat, lng) {
+                const safeLat = Number(lat);
+                const safeLng = Number(lng);
+                pickerMarker.setLatLng([safeLat, safeLng]);
+                pickerMap.panTo([safeLat, safeLng]);
+                latInput.value = safeLat.toFixed(7);
+                lngInput.value = safeLng.toFixed(7);
+                coordReadout.textContent = formatCoordText(safeLat, safeLng);
+            }
+
+            if (latInput.value && lngInput.value) {
+                syncSelection(parseFloat(latInput.value), parseFloat(lngInput.value));
+            } else {
+                syncSelection(defaultCenter[0], defaultCenter[1]);
+            }
+
+            pickerMap.on('click', function (event) {
+                syncSelection(event.latlng.lat, event.latlng.lng);
+            });
+
+            pickerMarker.on('dragend', function () {
+                const position = pickerMarker.getLatLng();
+                syncSelection(position.lat, position.lng);
+            });
+
+            document.getElementById('use-location-btn').addEventListener('click', function () {
+                if (!navigator.geolocation) {
+                    alert('Browser Anda tidak mendukung geolocation.');
+                    return;
+                }
+
+                navigator.geolocation.getCurrentPosition(function (position) {
+                    syncSelection(position.coords.latitude, position.coords.longitude);
+                }, function () {
+                    alert('Gagal mendapatkan lokasi Anda. Silakan pilih titik di peta secara manual.');
+                }, {
+                    enableHighAccuracy: true,
+                    timeout: 10000
+                });
+            });
+
+            const publicMap = L.map('public-complaint-map').setView(defaultCenter, 11);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(publicMap);
+
+            const complaintLayer = L.layerGroup().addTo(publicMap);
+
+            if (Array.isArray(geoData) && geoData.length) {
+                geoData.forEach(function (item) {
+                    const category = item.kategori || 'jalan_rusak';
+                    const color = markerColors[category] || '#2563eb';
+                    const marker = L.marker([item.latitude, item.longitude], {
+                        icon: makeMarkerIcon(color)
+                    }).addTo(complaintLayer);
+
+                    const categoryLabel = item.kategori ? ({{ label_map|tojson|safe }}[item.kategori] || item.kategori) : 'Kategori tidak tersedia';
+                    marker.bindPopup(`
+                        <div style="min-width:180px;">
+                            <strong>${item.title || 'Laporan'}</strong><br>
+                            <small>${item.reporter_name || 'Pelapor'} • ${item.area || 'Area umum'}</small><br>
+                            <span>${categoryLabel}</span>
+                        </div>
+                    `);
+                });
+
+                const bounds = L.latLngBounds(geoData.map(function (item) {
+                    return [item.latitude, item.longitude];
+                }));
+                publicMap.fitBounds(bounds.pad(0.25));
+            }
+        });
+    </script>
 </body>
 </html>
