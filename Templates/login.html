@@ -6,21 +6,9 @@
     <title>Login Administrator — CivicPulse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/civicpulse.css') }}">
     <style>
-        :root {
-            --canvas: #F7F7F5;
-            --surface: #FFFFFF;
-            --border: #E2E2DF;
-            --ink: #141517;
-            --muted: #57595E;
-            --navy: #183153;
-            --navy-hover: #0F213A;
-            --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-            --heading: "Plus Jakarta Sans", sans-serif;
-            --body: "Inter", sans-serif;
-        }
-        * { box-sizing: border-box; }
         body {
             min-height: 100vh;
             margin: 0;
@@ -44,19 +32,7 @@
         .wordmark { color: var(--navy); font: 700 16px var(--heading); letter-spacing: -.025em; }
         h1 { margin: 26px 0 6px; font: 700 25px/1.2 var(--heading); letter-spacing: -.025em; }
         .description { margin: 0 0 24px; color: var(--muted); font-size: 13px; }
-        .flash {
-            margin-bottom: 12px;
-            padding: 11px 12px;
-            border: 1px solid var(--border);
-            border-left-width: 3px;
-            border-radius: 6px;
-            background: #F7F7F5;
-            color: var(--ink);
-            font-size: 12px;
-        }
-        .flash.danger, .flash.error { border-color: #FECACA; border-left-color: #B91C1C; background: #FEF2F2; color: #7F1D1D; }
-        .flash.warning { border-color: #FED7AA; border-left-color: #C2410C; background: #FFEDD5; color: #7C2D12; }
-        .flash.info, .flash.success { border-color: #BBF7D0; border-left-color: #15803D; background: #DCFCE7; color: #14532D; }
+        .login-card .flash { margin-bottom: 12px; }
         form { display: grid; gap: 16px; }
         .field { display: grid; gap: 6px; }
         label { font-size: 12px; font-weight: 600; }
@@ -95,9 +71,6 @@
         }
         .back-link:hover { text-decoration: underline; text-underline-offset: 3px; }
         @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-        }
         @media (max-width: 480px) { .login-card { padding: 24px 20px; } }
     </style>
 </head>

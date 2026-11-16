@@ -7,36 +7,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/civicpulse.css') }}">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
     <style>
-        :root {
-            --canvas: #F7F7F5;
-            --surface: #FFFFFF;
-            --border: #E2E2DF;
-            --border-hover: #94A3B8;
-            --ink: #141517;
-            --muted: #57595E;
-            --navy: #183153;
-            --navy-hover: #0F213A;
-            --green: #14532D;
-            --green-bg: #DCFCE7;
-            --green-border: #BBF7D0;
-            --orange: #7C2D12;
-            --orange-bg: #FFEDD5;
-            --orange-border: #FED7AA;
-            --blue: #1E3A8A;
-            --blue-bg: #DBEAFE;
-            --blue-border: #BFDBFE;
-            --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-            --mono: "JetBrains Mono", monospace;
-            --heading: "Plus Jakarta Sans", sans-serif;
-            --body: "Inter", sans-serif;
-        }
-        * { box-sizing: border-box; }
-        body { margin: 0; background: var(--canvas); color: var(--ink); font: 14px/1.55 var(--body); }
-        a { color: inherit; text-decoration: none; }
-        button, select { font: inherit; }
-        .mono, .technical, time { font-family: var(--mono); font-variant-numeric: tabular-nums; }
         .topbar {
             min-height: 72px;
             padding: 12px max(24px, calc((100% - 1380px) / 2));
@@ -71,17 +44,6 @@
         .nav-link:active { transform: scale(.985); }
         .page { width: min(1380px, calc(100% - 48px)); margin: 0 auto; padding: 24px 0 56px; }
         .flash-stack { display: grid; gap: 8px; margin-bottom: 18px; }
-        .flash {
-            padding: 11px 14px;
-            border: 1px solid var(--border);
-            border-left: 3px solid var(--navy);
-            border-radius: 6px;
-            background: var(--surface);
-            font-size: 12px;
-        }
-        .flash.success, .flash.info { border-color: var(--green-border); border-left-color: #15803D; background: var(--green-bg); color: var(--green); }
-        .flash.warning { border-color: var(--orange-border); border-left-color: #C2410C; background: var(--orange-bg); color: var(--orange); }
-        .flash.danger, .flash.error { border-color: #FECACA; border-left-color: #B91C1C; background: #FEF2F2; color: #7F1D1D; }
         h1, h2, h3 { font-family: var(--heading); letter-spacing: -.025em; }
         .page-heading { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 18px; animation: fade-up 260ms var(--ease-out) both; }
         .eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
@@ -111,11 +73,6 @@
         #admin-map { width: 100%; height: 330px; background: #ECECE8; }
         .map-skeleton { position: absolute; z-index: 800; inset: 0; pointer-events: none; opacity: 1; transition: opacity 240ms ease; }
         .map-skeleton.is-hidden { opacity: 0; }
-        .skeleton-shimmer {
-            background: linear-gradient(90deg, #ECECE8 0%, #F7F7F5 50%, #ECECE8 100%);
-            background-size: 200% 100%;
-            animation: shimmer 1.4s infinite linear;
-        }
         .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; }
         .legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
         .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -164,20 +121,6 @@
         .report-id { font: 500 11px var(--mono); white-space: nowrap; }
         .report-name { font-weight: 600; }
         .secondary-text { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
-        .status-pill {
-            display: inline-flex;
-            padding: 3px 8px;
-            border: 1px solid var(--border);
-            border-radius: 999px;
-            background: #F1F1EF;
-            color: var(--ink);
-            font-size: 10px;
-            font-weight: 600;
-            white-space: nowrap;
-        }
-        .status-pill.verified, .status-pill.complete { color: var(--green); background: var(--green-bg); border-color: var(--green-border); }
-        .status-pill.pending { color: var(--orange); background: var(--orange-bg); border-color: var(--orange-border); }
-        .status-pill.progress { color: var(--blue); background: var(--blue-bg); border-color: var(--blue-border); }
         .action-cell { min-width: 220px; }
         .verify-form { display: grid; gap: 7px; min-width: 205px; }
         .verify-form select { width: 100%; min-height: 31px; font-size: 10px; }
@@ -199,13 +142,10 @@
         .map-button { border-color: var(--border); background: #fff; color: var(--navy); }
         .map-button:hover { border-color: var(--navy); background: #F7F7F5; }
         .empty-cell { padding: 24px; color: var(--muted); text-align: center; }
+        .status-pill { font-size: 10px; }
         .custom-div-icon { border: 0; background: transparent; }
         .custom-div-icon span { display: block; width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 5px rgba(20,21,23,.35); }
         @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes shimmer { to { background-position: -200% 0; } }
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-        }
         @media (max-width: 900px) {
             .overview-grid { grid-template-columns: 1fr; }
             .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }

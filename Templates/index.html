@@ -7,46 +7,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/civicpulse.css') }}">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
     <style>
-        :root {
-            color-scheme: light;
-            --canvas: #F7F7F5;
-            --surface: #FFFFFF;
-            --border: #E2E2DF;
-            --border-hover: #94A3B8;
-            --ink: #141517;
-            --muted: #57595E;
-            --navy: #183153;
-            --navy-hover: #0F213A;
-            --green: #14532D;
-            --green-bg: #DCFCE7;
-            --green-border: #BBF7D0;
-            --orange: #7C2D12;
-            --orange-bg: #FFEDD5;
-            --orange-border: #FED7AA;
-            --blue: #1E3A8A;
-            --blue-bg: #DBEAFE;
-            --blue-border: #BFDBFE;
-            --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-            --mono: "JetBrains Mono", monospace;
-            --heading: "Plus Jakarta Sans", sans-serif;
-            --body: "Inter", sans-serif;
-        }
-
-        * { box-sizing: border-box; }
         html { scroll-behavior: smooth; }
-        body {
-            margin: 0;
-            background: var(--canvas);
-            color: var(--ink);
-            font-family: var(--body);
-            font-size: 14px;
-            line-height: 1.55;
-        }
-        a { color: inherit; text-decoration: none; }
-        button, input, textarea { font: inherit; }
-        .mono, time, .technical { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
         .site-header {
             min-height: 66px;
@@ -120,23 +86,6 @@
             animation: fade-up 240ms var(--ease-out) both;
         }
         .result-title { font-weight: 700; }
-        .status-pill {
-            display: inline-flex;
-            align-items: center;
-            width: fit-content;
-            padding: 3px 8px;
-            border: 1px solid var(--border);
-            border-radius: 999px;
-            background: #F1F1EF;
-            color: var(--ink);
-            font-size: 11px;
-            font-weight: 600;
-            white-space: nowrap;
-        }
-        .status-pill.verified, .status-pill.complete { color: var(--green); background: var(--green-bg); border-color: var(--green-border); }
-        .status-pill.pending { color: var(--orange); background: var(--orange-bg); border-color: var(--orange-border); }
-        .status-pill.progress { color: var(--blue); background: var(--blue-bg); border-color: var(--blue-border); }
-
         .main-grid {
             display: grid;
             grid-template-columns: 1.15fr 0.85fr;
@@ -159,12 +108,13 @@
         .panel-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; }
         .panel-heading h2 { margin: 0; font-size: 17px; }
         .panel-note { color: var(--muted); font-size: 12px; }
+        .public-flashes { display: grid; gap: 8px; margin: 18px 0; }
 
         .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
         .field { display: grid; gap: 6px; min-width: 0; }
         .field.full { grid-column: 1 / -1; }
         label { font-size: 12px; font-weight: 600; }
-        input, textarea {
+        input, select, textarea {
             width: 100%;
             min-height: 39px;
             padding: 9px 10px;
@@ -175,9 +125,15 @@
             outline: none;
             transition: border-color 180ms ease, box-shadow 180ms ease;
         }
-        input:focus, textarea:focus { border-color: var(--navy); box-shadow: 0 0 0 3px rgba(24, 49, 83, .11); }
+        input:focus, select:focus, textarea:focus { border-color: var(--navy); box-shadow: 0 0 0 3px rgba(24, 49, 83, .11); }
         textarea { min-height: 100px; resize: vertical; }
         input::placeholder, textarea::placeholder { color: #85878C; }
+        .upload-note { margin: 0; color: var(--muted); font-size: 11px; }
+        .photo-preview { display: none; align-items: center; gap: 10px; margin-top: 8px; }
+        .photo-preview.is-visible { display: flex; }
+        .photo-preview img { width: 64px; height: 64px; object-fit: cover; border: 1px solid var(--border); border-radius: 6px; }
+        .photo-preview-name { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+        .photo-preview .text-button { flex: 0 0 auto; color: #991B1B; }
         .location-picker { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
         .location-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 9px; }
         .location-title strong { font-size: 12px; }
@@ -185,22 +141,8 @@
         .map-frame { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; }
         #location-picker-map { width: 100%; height: 280px; background: #ECECE8; }
         .map-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-        .button {
-            min-height: 38px;
-            padding: 8px 13px;
-            border: 1px solid var(--navy);
-            border-radius: 6px;
-            background: var(--navy);
-            color: #fff;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 180ms ease, transform 220ms var(--ease-out), border-color 180ms ease;
-        }
-        .button:hover { background: var(--navy-hover); border-color: var(--navy-hover); }
-        .button:active, .text-button:active { transform: scale(.985); }
-        .button.secondary { background: #fff; color: var(--navy); }
-        .button.secondary:hover { background: #F1F3F4; }
+        .location-status { min-height: 19px; margin: 7px 0 0; color: var(--muted); font-size: 11px; }
+        .text-button:active { transform: scale(.985); }
         .text-button { border: 0; background: transparent; padding: 5px 0; color: var(--navy); font-size: 12px; font-weight: 600; cursor: pointer; transition: transform 220ms var(--ease-out); }
         .submit-row { margin-top: 16px; }
         .submit-row .button { min-width: 150px; }
@@ -214,6 +156,22 @@
             color: var(--muted);
             font-size: 12px;
         }
+        .ticket-code-row { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 10px 0 8px; }
+        .ticket-code { color: var(--ink); font: 600 22px/1.2 var(--mono); letter-spacing: .02em; }
+        .copy-status { min-height: 18px; color: var(--green); font-size: 11px; }
+        .tracking-panel { margin-bottom: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: #FAFAF8; }
+        .tracking-panel h3 { margin: 0 0 9px; font-size: 14px; }
+        .tracking-form { display: flex; gap: 8px; }
+        .tracking-form input { min-width: 0; flex: 1; }
+        .tracking-result { margin-top: 12px; }
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+        .tracking-summary { padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+        .tracking-meta { margin: 5px 0 9px; color: var(--muted); font-size: 11px; }
+        .timeline { display: grid; gap: 0; margin: 10px 0 0; padding: 0; list-style: none; }
+        .timeline li { position: relative; padding: 0 0 12px 20px; border-left: 1px solid #CBD5E1; }
+        .timeline li:last-child { padding-bottom: 0; border-left-color: transparent; }
+        .timeline li::before { position: absolute; top: 3px; left: -5px; width: 9px; height: 9px; border: 2px solid #fff; border-radius: 50%; background: var(--navy); box-shadow: 0 0 0 1px var(--navy); content: ""; }
+        .timeline time { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
 
         .map-frame.public-frame { margin-bottom: 14px; }
         #public-complaint-map { width: 100%; height: 310px; background: #ECECE8; }
@@ -226,11 +184,6 @@
             transition: opacity 240ms ease;
         }
         .map-skeleton.is-hidden { opacity: 0; }
-        .skeleton-shimmer {
-            background: linear-gradient(90deg, #ECECE8 0%, #F7F7F5 50%, #ECECE8 100%);
-            background-size: 200% 100%;
-            animation: shimmer 1.4s infinite linear;
-        }
         .legend { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 0 0 15px; border-bottom: 1px solid var(--border); }
         .legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
         .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -256,10 +209,6 @@
         .custom-div-icon span { display: block; width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 5px rgba(20,21,23,.35); }
 
         @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes shimmer { to { background-position: -200% 0; } }
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-        }
         @media (max-width: 940px) {
             .editorial { grid-template-columns: 1fr; gap: 24px; }
             .main-grid { grid-template-columns: 1fr; }
@@ -277,6 +226,7 @@
             .panel { padding: 16px; }
             .form-grid { grid-template-columns: 1fr; }
             .field.full { grid-column: auto; }
+            .tracking-form { align-items: stretch; flex-direction: column; }
             #public-complaint-map { height: 270px; }
             th, td { padding: 9px 8px; }
         }
@@ -317,9 +267,11 @@
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                {% for category, message in messages %}
-                    <div class="submission-result" role="status">{{ message }}</div>
-                {% endfor %}
+                <div class="public-flashes">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}" role="status">{{ message }}</div>
+                    {% endfor %}
+                </div>
             {% endif %}
         {% endwith %}
 
@@ -327,6 +279,11 @@
         <section class="submission-result" role="status">
             <div class="result-title">Laporan berhasil diterima</div>
             <div>{{ hasil.judul }} · <strong>{{ hasil.nama_kategori }}</strong> · <span class="technical">{{ hasil.confidence }}%</span> · <span class="status-pill {% if hasil.status == 'Terverifikasi' %}verified{% elif hasil.status == 'Menunggu Verifikasi' %}pending{% endif %}">{{ hasil.status }}</span></div>
+            <div class="ticket-code-row">
+                <code class="ticket-code" id="ticket-code">{{ hasil.ticket_code }}</code>
+                <button class="button secondary" type="button" id="copy-ticket-button" data-ticket="{{ hasil.ticket_code }}">Salin Kode Tiket</button>
+            </div>
+            <div class="copy-status" id="copy-ticket-status" role="status" aria-live="polite"></div>
         </section>
         {% endif %}
 
@@ -336,7 +293,7 @@
                     <h2>Formulir pengaduan</h2>
                     <span class="panel-note">Kolom bertanda * wajib diisi</span>
                 </div>
-                <form method="POST" id="complaint-form">
+                <form method="POST" id="complaint-form" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="form-grid">
                         <div class="field">
@@ -345,7 +302,21 @@
                         </div>
                         <div class="field">
                             <label for="area">Wilayah / kecamatan</label>
-                            <input id="area" type="text" name="area" placeholder="Contoh: Kec. Kambu">
+                            <select id="area" name="area">
+                                <option value="">Pilih kecamatan (opsional)</option>
+                                <option value="Abeli">Abeli</option>
+                                <option value="Baruga">Baruga</option>
+                                <option value="Kadia">Kadia</option>
+                                <option value="Kambu">Kambu</option>
+                                <option value="Kendari">Kendari</option>
+                                <option value="Kendari Barat">Kendari Barat</option>
+                                <option value="Mandonga">Mandonga</option>
+                                <option value="Nambo">Nambo</option>
+                                <option value="Poasia">Poasia</option>
+                                <option value="Puuwatu">Puuwatu</option>
+                                <option value="Wua-Wua">Wua-Wua</option>
+                                <option value="Lainnya / Umum">Lainnya / Umum</option>
+                            </select>
                         </div>
                         <div class="field full">
                             <label for="title">Judul permasalahan *</label>
@@ -354,6 +325,17 @@
                         <div class="field full">
                             <label for="description">Deskripsi kejadian *</label>
                             <textarea id="description" name="description" placeholder="Jelaskan kondisi, waktu, atau dampak yang terlihat" required></textarea>
+                        </div>
+                        <div class="field full">
+                            <label for="photo">Foto bukti (opsional)</label>
+                            <input id="photo" type="file" name="photo" accept="image/jpeg,image/png,image/webp">
+                            <p class="upload-note">JPEG, PNG, atau WebP. Maksimal 5 MB.</p>
+                            <div class="photo-preview" id="photo-preview" aria-live="polite">
+                                <img id="photo-preview-image" alt="Pratinjau foto bukti">
+                                <span class="photo-preview-name" id="photo-preview-name"></span>
+                                <button class="text-button" type="button" id="remove-photo-button">Batal</button>
+                            </div>
+                            <p class="location-status" id="photo-status" role="status" aria-live="polite"></p>
                         </div>
                     </div>
                     <div class="location-picker">
@@ -367,8 +349,10 @@
                         </div>
                         <div class="map-toolbar">
                             <button type="button" class="button secondary" id="use-location-btn">Gunakan Lokasi Saya</button>
+                            <button type="button" class="button secondary" id="clear-location-btn">Hapus Titik</button>
                             <span class="panel-note">Klik peta atau geser penanda untuk memilih lokasi.</span>
                         </div>
+                        <p class="location-status" id="location-status" role="status" aria-live="polite"></p>
                         <input type="hidden" name="latitude" id="latitude" value="">
                         <input type="hidden" name="longitude" id="longitude" value="">
                     </div>
@@ -405,12 +389,19 @@
                         {% if statistik %}
                             {% for item in statistik %}
                                 {% set share = ((item.total / totals.count) * 100) if totals.count else 0 %}
+                                {% set category_colors = {
+                                    'jalan_rusak': '#dc2626',
+                                    'kebersihan_dan_drainase': '#ea580c',
+                                    'taman_penataan_lingkungan': '#16a34a',
+                                    'utilitas_air_pdam': '#0284c7',
+                                    'utilitas_listrik': '#d97706'
+                                } %}
                                 <div class="category-row">
                                     <div class="category-meta">
                                         <span>{{ label_map.get(item.kategori, item.kategori) }}</span>
                                         <strong>{{ item.total }}</strong>
                                     </div>
-                                    <div class="progress-track"><div class="progress-fill" style="width: {{ share }}%"></div></div>
+                                    <div class="progress-track"><div class="progress-fill" style="width: {{ share }}%; background-color: {{ category_colors.get(item.kategori, '#183153') }}"></div></div>
                                 </div>
                             {% endfor %}
                         {% else %}
@@ -426,13 +417,22 @@
                 <h2>Riwayat pengaduan terkini</h2>
                 <span class="panel-note">Menampilkan hingga 15 laporan</span>
             </div>
+            <section class="tracking-panel" aria-labelledby="tracking-title">
+                <h3 id="tracking-title">Lacak Status Laporan</h3>
+                <form class="tracking-form" id="tracking-form">
+                    <label class="sr-only" for="tracking-ticket">Kode tiket laporan</label>
+                    <input id="tracking-ticket" name="ticket_code" type="text" maxlength="20" placeholder="Contoh: CP-2026-0001" value="{{ hasil.ticket_code if hasil else '' }}" autocomplete="off" required>
+                    <button class="button" type="submit" id="tracking-submit">Lacak laporan</button>
+                </form>
+                <div class="tracking-result" id="tracking-result" role="status" aria-live="polite"></div>
+            </section>
             <div class="table-scroll">
                 <table>
                     <thead><tr><th>Waktu</th><th>Laporan</th><th>Kategori</th><th>Status</th></tr></thead>
                     <tbody>
                         {% for item in laporan %}
                         <tr>
-                            <td><time class="technical">{{ item.created_at }}</time></td>
+                            <td><time class="technical">{{ item.created_at|wita }}</time></td>
                             <td><span class="report-title">{{ item.title }}</span><span class="report-sub">{{ item.area or 'Wilayah umum' }}</span></td>
                             <td>{{ label_map.get(item.verified_category or item.predicted_category, item.verified_category or item.predicted_category) }}</td>
                             <td><span class="status-pill {% if item.status == 'Terverifikasi' %}verified{% elif item.status == 'Selesai' %}complete{% elif item.status == 'Menunggu Verifikasi' %}pending{% elif item.status == 'Dalam Tindak Lanjut' %}progress{% endif %}">{{ item.status }}</span></td>
@@ -447,6 +447,7 @@
     </main>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script>
         const defaultCenter = [-3.9985, 122.5129];
         const markerColors = {
@@ -458,6 +459,10 @@
         };
         const geoData = {{ laporan_geo|tojson|safe }};
         const categoryLabels = {{ label_map|tojson|safe }};
+        const districts = [
+            'Abeli', 'Baruga', 'Kadia', 'Kambu', 'Kendari', 'Kendari Barat',
+            'Mandonga', 'Nambo', 'Poasia', 'Puuwatu', 'Wua-Wua'
+        ];
 
         function markerIcon(color) {
             return L.divIcon({
@@ -504,39 +509,185 @@
             const latitudeInput = document.getElementById('latitude');
             const longitudeInput = document.getElementById('longitude');
             const selectedCoordinates = document.getElementById('selected-coordinates');
-            const pickerMarker = L.marker(defaultCenter, { draggable: true }).addTo(pickerMap);
+            const locationStatus = document.getElementById('location-status');
+            const areaSelect = document.getElementById('area');
+            const gpsButton = document.getElementById('use-location-btn');
+            const initialGpsButtonText = gpsButton.textContent;
+            let pickerMarker = null;
+            let reverseGeocodeTimer = null;
+            let reverseGeocodeController = null;
+            let lastReverseGeocodeAt = 0;
+            let reverseGeocodeRequestId = 0;
+
+            function setLocationStatus(message) {
+                locationStatus.textContent = message;
+            }
+
+            function normalizedAddress(value) {
+                return String(value || '').toLocaleLowerCase('id')
+                    .replace(/^(kecamatan|kec|district)\s+/, '')
+                    .replace(/[^a-z0-9]+/g, ' ')
+                    .trim();
+            }
+
+            function scheduleReverseGeocode(lat, lng) {
+                window.clearTimeout(reverseGeocodeTimer);
+                if (reverseGeocodeController) reverseGeocodeController.abort();
+                const requestId = ++reverseGeocodeRequestId;
+                const pointKey = `${Number(lat).toFixed(7)},${Number(lng).toFixed(7)}`;
+                setLocationStatus('Koordinat tersimpan; mencari kecamatan...');
+                reverseGeocodeTimer = window.setTimeout(async function () {
+                    const waitMs = Math.max(0, 1000 - (Date.now() - lastReverseGeocodeAt));
+                    if (waitMs) await new Promise(resolve => window.setTimeout(resolve, waitMs));
+                    if (requestId !== reverseGeocodeRequestId ||
+                        `${latitudeInput.value},${longitudeInput.value}` !== pointKey) return;
+
+                    reverseGeocodeController = new AbortController();
+                    try {
+                        lastReverseGeocodeAt = Date.now();
+                        const query = new URLSearchParams({
+                            format: 'jsonv2',
+                            lat: String(lat),
+                            lon: String(lng),
+                            zoom: '10',
+                            addressdetails: '1'
+                        });
+                        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${query}`, {
+                            headers: { Accept: 'application/json' },
+                            signal: reverseGeocodeController.signal
+                        });
+                        if (!response.ok) throw new Error('Layanan pencarian kecamatan sedang tidak tersedia.');
+                        const result = await response.json();
+                        if (requestId !== reverseGeocodeRequestId) return;
+
+                        const address = result.address || {};
+                        const addressValues = [
+                            address.city_district,
+                            address.county,
+                            address.suburb,
+                            address.municipality,
+                            address.town,
+                            address.village,
+                            address.neighbourhood,
+                            address.quarter
+                        ].map(normalizedAddress);
+                        const match = [...districts].sort((a, b) => b.length - a.length).find(district => {
+                            const normalizedDistrict = normalizedAddress(district);
+                            return addressValues.some(value => value === normalizedDistrict);
+                        });
+                        if (match) {
+                            areaSelect.value = match;
+                            setLocationStatus(`Kecamatan ${match} dipilih otomatis dari lokasi.`);
+                        } else {
+                            setLocationStatus('Titik tersimpan. Kecamatan belum dapat dikenali otomatis.');
+                        }
+                    } catch (error) {
+                        if (error.name !== 'AbortError' && requestId === reverseGeocodeRequestId) {
+                            setLocationStatus('Titik tersimpan. Kecamatan tidak dapat dicari; pilih dari daftar.');
+                        }
+                    }
+                }, 600);
+            }
 
             function setLocation(lat, lng) {
-                latitudeInput.value = Number(lat).toFixed(7);
-                longitudeInput.value = Number(lng).toFixed(7);
-                selectedCoordinates.textContent = `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
-                pickerMarker.setLatLng([lat, lng]);
+                const point = [Number(lat), Number(lng)];
+                if (!pickerMarker) {
+                    pickerMarker = L.marker(point, { draggable: true }).addTo(pickerMap);
+                    pickerMarker.on('dragend', function () {
+                        const draggedPoint = pickerMarker.getLatLng();
+                        setLocation(draggedPoint.lat, draggedPoint.lng);
+                    });
+                } else {
+                    pickerMarker.setLatLng(point);
+                }
+                latitudeInput.value = point[0].toFixed(7);
+                longitudeInput.value = point[1].toFixed(7);
+                selectedCoordinates.textContent = `${point[0].toFixed(5)}, ${point[1].toFixed(5)}`;
+                scheduleReverseGeocode(point[0], point[1]);
+            }
+
+            function clearLocation() {
+                window.clearTimeout(reverseGeocodeTimer);
+                reverseGeocodeRequestId++;
+                if (reverseGeocodeController) reverseGeocodeController.abort();
+                reverseGeocodeController = null;
+                if (pickerMarker) pickerMap.removeLayer(pickerMarker);
+                pickerMarker = null;
+                latitudeInput.value = '';
+                longitudeInput.value = '';
+                selectedCoordinates.textContent = 'Pilih titik di peta';
+                setLocationStatus('Titik lokasi dihapus.');
             }
 
             pickerMap.on('click', event => setLocation(event.latlng.lat, event.latlng.lng));
-            pickerMarker.on('dragend', function () {
-                const point = pickerMarker.getLatLng();
-                setLocation(point.lat, point.lng);
-            });
-            document.getElementById('use-location-btn').addEventListener('click', function () {
+            document.getElementById('clear-location-btn').addEventListener('click', clearLocation);
+            gpsButton.addEventListener('click', function () {
                 if (!navigator.geolocation) {
-                    window.alert('Browser ini tidak mendukung layanan lokasi.');
+                    setLocationStatus('Browser ini tidak mendukung layanan lokasi.');
                     return;
                 }
+                gpsButton.disabled = true;
+                gpsButton.textContent = 'Mencari koordinat GPS...';
+                setLocationStatus('Mencari koordinat GPS...');
                 navigator.geolocation.getCurrentPosition(
                     position => {
                         const lat = position.coords.latitude;
                         const lng = position.coords.longitude;
                         setLocation(lat, lng);
                         pickerMap.setView([lat, lng], 16);
+                        gpsButton.disabled = false;
+                        gpsButton.textContent = initialGpsButtonText;
                     },
-                    () => window.alert('Lokasi tidak dapat diakses. Pilih titik secara manual pada peta.'),
+                    () => {
+                        gpsButton.disabled = false;
+                        gpsButton.textContent = initialGpsButtonText;
+                        setLocationStatus('Lokasi tidak dapat diakses. Pilih titik secara manual pada peta.');
+                    },
                     { enableHighAccuracy: true, timeout: 10000 }
                 );
             });
 
+            const photoInput = document.getElementById('photo');
+            const photoPreview = document.getElementById('photo-preview');
+            const photoPreviewImage = document.getElementById('photo-preview-image');
+            const photoPreviewName = document.getElementById('photo-preview-name');
+            const photoStatus = document.getElementById('photo-status');
+            let photoPreviewUrl = null;
+
+            function clearPhotoPreview() {
+                photoInput.value = '';
+                if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+                photoPreviewUrl = null;
+                photoPreviewImage.removeAttribute('src');
+                photoPreviewName.textContent = '';
+                photoPreview.classList.remove('is-visible');
+            }
+
+            photoInput.addEventListener('change', function () {
+                const file = photoInput.files[0];
+                photoStatus.textContent = '';
+                if (!file) {
+                    clearPhotoPreview();
+                    return;
+                }
+                if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+                    clearPhotoPreview();
+                    photoStatus.textContent = 'Pilih JPEG, PNG, atau WebP dengan ukuran maksimal 5 MB.';
+                    return;
+                }
+                if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+                photoPreviewUrl = URL.createObjectURL(file);
+                photoPreviewImage.src = photoPreviewUrl;
+                photoPreviewName.textContent = file.name;
+                photoPreview.classList.add('is-visible');
+            });
+            document.getElementById('remove-photo-button').addEventListener('click', clearPhotoPreview);
+
             const publicMap = L.map('public-complaint-map').setView(defaultCenter, 11);
             addOsmLayer(publicMap, 'public-map-skeleton');
+            const markerCluster = typeof L.markerClusterGroup === 'function'
+                ? L.markerClusterGroup({ chunkedLoading: true })
+                : L.featureGroup();
             const points = [];
             geoData.forEach(function (item) {
                 const lat = Number(item.latitude);
@@ -544,11 +695,80 @@
                 if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
                 const marker = L.marker([lat, lng], {
                     icon: markerIcon(markerColors[item.kategori] || '#183153')
-                }).addTo(publicMap);
+                });
                 bindReportPopup(marker, item);
+                markerCluster.addLayer(marker);
                 points.push([lat, lng]);
             });
-            if (points.length) publicMap.fitBounds(L.latLngBounds(points).pad(0.2));
+            publicMap.addLayer(markerCluster);
+            if (points.length) publicMap.fitBounds(markerCluster.getBounds().pad(0.2));
+
+            const ticketCopyButton = document.getElementById('copy-ticket-button');
+            if (ticketCopyButton) {
+                ticketCopyButton.addEventListener('click', async function () {
+                    const status = document.getElementById('copy-ticket-status');
+                    try {
+                        await navigator.clipboard.writeText(ticketCopyButton.dataset.ticket);
+                        status.textContent = 'Tersalin';
+                        ticketCopyButton.textContent = 'Tersalin';
+                    } catch (error) {
+                        status.textContent = 'Kode tiket tidak dapat disalin. Silakan salin secara manual.';
+                    }
+                });
+            }
+
+            const trackingForm = document.getElementById('tracking-form');
+            trackingForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+                const code = document.getElementById('tracking-ticket').value.trim().toUpperCase();
+                const submitButton = document.getElementById('tracking-submit');
+                const resultElement = document.getElementById('tracking-result');
+                resultElement.textContent = 'Memuat status laporan...';
+                submitButton.disabled = true;
+                try {
+                    const response = await fetch(`/api/tiket/${encodeURIComponent(code)}`, {
+                        headers: { Accept: 'application/json' }
+                    });
+                    const payload = await response.json();
+                    if (!response.ok) throw new Error(payload.message || 'Status laporan tidak dapat dimuat.');
+
+                    const data = payload.data;
+                    const summary = document.createElement('div');
+                    summary.className = 'tracking-summary';
+                    const title = document.createElement('strong');
+                    title.textContent = data.title;
+                    const metadata = document.createElement('p');
+                    metadata.className = 'tracking-meta';
+                    metadata.textContent = `${data.ticket_code} · ${data.reporter_init} · ${data.area} · ${data.kategori}`;
+                    const current = document.createElement('span');
+                    current.className = `status-pill ${data.status === 'Selesai' ? 'complete' : data.status === 'Menunggu Verifikasi' ? 'pending' : data.status === 'Dalam Tindak Lanjut' ? 'progress' : 'verified'}`;
+                    current.textContent = data.status;
+                    summary.append(title, metadata, current);
+
+                    const timeline = document.createElement('ol');
+                    timeline.className = 'timeline';
+                    (data.timeline || []).forEach(function (item) {
+                        const entry = document.createElement('li');
+                        const eventLabel = item.event_type === 'submitted'
+                            ? 'Laporan dibuat'
+                            : item.event_type === 'baseline'
+                                ? 'Status terakhir yang tercatat'
+                                : 'Status diperbarui';
+                        const statusText = document.createElement('strong');
+                        statusText.textContent = `${eventLabel}: ${item.status}`;
+                        const timestamp = document.createElement('time');
+                        timestamp.textContent = item.changed_at;
+                        entry.append(statusText, timestamp);
+                        timeline.appendChild(entry);
+                    });
+                    summary.appendChild(timeline);
+                    resultElement.replaceChildren(summary);
+                } catch (error) {
+                    resultElement.textContent = error.message || 'Tidak dapat menghubungi layanan pelacakan.';
+                } finally {
+                    submitButton.disabled = false;
+                }
+            });
 
             document.getElementById('complaint-form').addEventListener('submit', function () {
                 const button = document.getElementById('submit-button');
