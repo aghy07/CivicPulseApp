@@ -129,12 +129,16 @@
         textarea { min-height: 100px; resize: vertical; }
         input::placeholder, textarea::placeholder { color: #85878C; }
         .upload-note { margin: 0; color: var(--muted); font-size: 11px; }
-        .photo-preview { display: none; align-items: center; gap: 10px; margin-top: 8px; }
+        .photo-preview { display: none; align-items: center; gap: 12px; margin-top: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: #FAFAF8; }
         .photo-preview.is-visible { display: flex; }
-        .photo-preview img { width: 64px; height: 64px; object-fit: cover; border: 1px solid var(--border); border-radius: 6px; }
-        .photo-preview-name { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+        .photo-preview img { width: 112px; height: 84px; flex: 0 0 auto; object-fit: cover; border: 1px solid var(--border); border-radius: 6px; background: #ECECE8; }
+        .photo-preview-details { display: grid; min-width: 0; gap: 4px; }
+        .photo-preview-name { overflow-wrap: anywhere; color: var(--ink); font-size: 11px; font-weight: 600; }
+        .photo-preview-purpose { color: var(--muted); font-size: 10px; }
         .photo-preview .text-button { flex: 0 0 auto; color: #991B1B; }
         .location-picker { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+        .location-address { margin-top: 12px; }
+        .location-address input[readonly] { background: #F7F7F5; color: var(--muted); }
         .location-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 9px; }
         .location-title strong { font-size: 12px; }
         .coordinates { color: var(--muted); font: 11px var(--mono); font-variant-numeric: tabular-nums; }
@@ -329,11 +333,14 @@
                         <div class="field full">
                             <label for="photo">Foto bukti (opsional)</label>
                             <input id="photo" type="file" name="photo" accept="image/jpeg,image/png,image/webp">
-                            <p class="upload-note">JPEG, PNG, atau WebP. Maksimal 5 MB.</p>
+                            <p class="upload-note">JPEG, PNG, atau WebP, maksimal 5 MB. Foto ini dilampirkan ke laporan dan dapat dilihat petugas di dashboard admin.</p>
                             <div class="photo-preview" id="photo-preview" aria-live="polite">
                                 <img id="photo-preview-image" alt="Pratinjau foto bukti">
-                                <span class="photo-preview-name" id="photo-preview-name"></span>
-                                <button class="text-button" type="button" id="remove-photo-button">Batal</button>
+                                <div class="photo-preview-details">
+                                    <span class="photo-preview-name" id="photo-preview-name"></span>
+                                    <span class="photo-preview-purpose">Foto akan disertakan bersama laporan untuk pemeriksaan petugas.</span>
+                                    <button class="text-button" type="button" id="remove-photo-button">Hapus foto</button>
+                                </div>
                             </div>
                             <p class="location-status" id="photo-status" role="status" aria-live="polite"></p>
                         </div>
@@ -351,6 +358,10 @@
                             <button type="button" class="button secondary" id="use-location-btn">Gunakan Lokasi Saya</button>
                             <button type="button" class="button secondary" id="clear-location-btn">Hapus Titik</button>
                             <span class="panel-note">Klik peta atau geser penanda untuk memilih lokasi.</span>
+                        </div>
+                        <div class="field location-address">
+                            <label for="location-address">Alamat perkiraan dari OpenStreetMap</label>
+                            <input id="location-address" name="location_address" type="text" readonly placeholder="Pilih titik di peta untuk mencari alamat.">
                         </div>
                         <p class="location-status" id="location-status" role="status" aria-live="polite"></p>
                         <input type="hidden" name="latitude" id="latitude" value="">
@@ -511,6 +522,7 @@
             const selectedCoordinates = document.getElementById('selected-coordinates');
             const locationStatus = document.getElementById('location-status');
             const areaSelect = document.getElementById('area');
+            const locationAddressInput = document.getElementById('location-address');
             const gpsButton = document.getElementById('use-location-btn');
             const initialGpsButtonText = gpsButton.textContent;
             let pickerMarker = null;
@@ -535,7 +547,8 @@
                 if (reverseGeocodeController) reverseGeocodeController.abort();
                 const requestId = ++reverseGeocodeRequestId;
                 const pointKey = `${Number(lat).toFixed(7)},${Number(lng).toFixed(7)}`;
-                setLocationStatus('Koordinat tersimpan; mencari kecamatan...');
+                locationAddressInput.value = '';
+                setLocationStatus('Koordinat tersimpan; mencari alamat dan kecamatan...');
                 reverseGeocodeTimer = window.setTimeout(async function () {
                     const waitMs = Math.max(0, 1000 - (Date.now() - lastReverseGeocodeAt));
                     if (waitMs) await new Promise(resolve => window.setTimeout(resolve, waitMs));
@@ -549,8 +562,9 @@
                             format: 'jsonv2',
                             lat: String(lat),
                             lon: String(lng),
-                            zoom: '10',
-                            addressdetails: '1'
+                            zoom: '18',
+                            addressdetails: '1',
+                            'accept-language': 'id'
                         });
                         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${query}`, {
                             headers: { Accept: 'application/json' },
@@ -563,11 +577,14 @@
                         const address = result.address || {};
                         const addressValues = [
                             address.city_district,
+                            address.state_district,
                             address.county,
+                            address.district,
                             address.suburb,
                             address.municipality,
                             address.town,
                             address.village,
+                            address.locality,
                             address.neighbourhood,
                             address.quarter
                         ].map(normalizedAddress);
@@ -575,11 +592,14 @@
                             const normalizedDistrict = normalizedAddress(district);
                             return addressValues.some(value => value === normalizedDistrict);
                         });
+                        locationAddressInput.value = result.display_name || '';
                         if (match) {
                             areaSelect.value = match;
-                            setLocationStatus(`Kecamatan ${match} dipilih otomatis dari lokasi.`);
+                            setLocationStatus(`Alamat ditemukan. Kecamatan ${match} dipilih otomatis.`);
                         } else {
-                            setLocationStatus('Titik tersimpan. Kecamatan belum dapat dikenali otomatis.');
+                            setLocationStatus(locationAddressInput.value
+                                ? 'Alamat ditemukan. Kecamatan tidak tersedia dari peta ini; pilih kecamatan dari daftar.'
+                                : 'Titik tersimpan. Kecamatan tidak tersedia dari peta ini; pilih dari daftar.');
                         }
                     } catch (error) {
                         if (error.name !== 'AbortError' && requestId === reverseGeocodeRequestId) {
@@ -616,6 +636,7 @@
                 latitudeInput.value = '';
                 longitudeInput.value = '';
                 selectedCoordinates.textContent = 'Pilih titik di peta';
+                locationAddressInput.value = '';
                 setLocationStatus('Titik lokasi dihapus.');
             }
 

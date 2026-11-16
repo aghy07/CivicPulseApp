@@ -121,6 +121,9 @@
         .report-id { font: 500 11px var(--mono); white-space: nowrap; }
         .report-name { font-weight: 600; }
         .secondary-text { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+        .report-photo-link { display: inline-flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--navy); font-size: 10px; font-weight: 600; }
+        .report-photo-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+        .report-photo { width: 52px; height: 40px; object-fit: cover; border: 1px solid var(--border); border-radius: 4px; background: #ECECE8; }
         .action-cell { min-width: 220px; }
         .verify-form { display: grid; gap: 7px; min-width: 205px; }
         .verify-form select { width: 100%; min-height: 31px; font-size: 10px; }
@@ -290,7 +293,16 @@
                                     <td>
                                         <span class="report-name">{{ item.title }}</span>
                                         <span class="secondary-text">{{ item.reporter_name }} · {{ item.area or 'Wilayah umum' }}</span>
+                                        {% if item.location_address %}
+                                            <span class="secondary-text">Alamat titik: {{ item.location_address }}</span>
+                                        {% endif %}
                                         <span class="secondary-text">{{ item.description }}</span>
+                                        {% if item.photo_path %}
+                                            <a class="report-photo-link" href="{{ url_for('admin_photo', complaint_id=item.id) }}" target="_blank" rel="noopener">
+                                                <img class="report-photo" src="{{ url_for('admin_photo', complaint_id=item.id) }}" alt="Pratinjau foto bukti laporan #{{ item.id }}">
+                                                Lihat foto bukti
+                                            </a>
+                                        {% endif %}
                                     </td>
                                     <td>{{ label_map.get(final_category, final_category) }}</td>
                                     <td class="technical">{{ item.confidence_score }}%</td>

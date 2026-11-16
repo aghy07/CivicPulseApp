@@ -22,6 +22,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_from_directory,
     session,
     url_for,
 )
@@ -97,7 +98,8 @@ def set_security_headers(response):
         "script-src 'self' 'unsafe-inline' https://unpkg.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
         "font-src 'self' https://fonts.gstatic.com; "
-        "img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com;"
+        "connect-src 'self' https://nominatim.openstreetmap.org; "
+        "img-src 'self' blob: data: https://*.tile.openstreetmap.org https://unpkg.com;"
     )
     return response
 
@@ -227,22 +229,25 @@ def process_photo(file):
 
 def record_status_event(conn, complaint_id, status, event_type):
     cursor = conn.cursor()
-    if isinstance(conn, sqlite3.Connection):
-        cursor.execute(
-            """
-            INSERT INTO complaint_status_history (complaint_id, status, event_type)
-            VALUES (?, ?, ?)
-            """,
-            (complaint_id, status, event_type),
-        )
-    else:
-        cursor.execute(
-            """
-            INSERT INTO complaint_status_history (complaint_id, status, event_type)
-            VALUES (%s, %s, %s)
-            """,
-            (complaint_id, status, event_type),
-        )
+    try:
+        if isinstance(conn, sqlite3.Connection):
+            cursor.execute(
+                """
+                INSERT INTO complaint_status_history (complaint_id, status, event_type)
+                VALUES (?, ?, ?)
+                """,
+                (complaint_id, status, event_type),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO complaint_status_history (complaint_id, status, event_type)
+                VALUES (%s, %s, %s)
+                """,
+                (complaint_id, status, event_type),
+            )
+    finally:
+        cursor.close()
 
 
 def check_duplication(conn, lat, lng, category):
@@ -327,6 +332,7 @@ def setup_database():
                     title TEXT NOT NULL,
                     description TEXT NOT NULL,
                     area TEXT,
+                    location_address TEXT,
                     predicted_category TEXT NOT NULL,
                     confidence_score REAL NOT NULL,
                     verified_category TEXT,
@@ -351,16 +357,46 @@ def setup_database():
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS complaint_status_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    complaint_id INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (complaint_id) REFERENCES complaints(id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_status_history_complaint_time
+                ON complaint_status_history (complaint_id, changed_at, id)
+                """
+            )
             columns = [row[1] for row in conn.execute("PRAGMA table_info(complaints)").fetchall()]
             if "ticket_code" not in columns:
                 conn.execute("ALTER TABLE complaints ADD COLUMN ticket_code TEXT")
-                # Backfill ticket_code for old data
-                rows = conn.execute("SELECT id FROM complaints WHERE ticket_code IS NULL").fetchall()
-                year = datetime.now().year
-                for idx, row in enumerate(rows, 1):
-                    conn.execute("UPDATE complaints SET ticket_code = ? WHERE id = ?", (f"CP-{year}-{idx:04d}", row[0]))
+            rows = conn.execute(
+                "SELECT id, created_at FROM complaints WHERE ticket_code IS NULL OR TRIM(ticket_code) = ''"
+            ).fetchall()
+            for row in rows:
+                try:
+                    ticket_year = int(str(row[1])[:4])
+                except (TypeError, ValueError):
+                    ticket_year = datetime.now().year
+                conn.execute(
+                    "UPDATE complaints SET ticket_code = ? WHERE id = ?",
+                    (f"CP-{ticket_year}-L{int(row[0]):08d}", row[0]),
+                )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_complaints_ticket_code_unique ON complaints(ticket_code)"
+            )
             if "photo_path" not in columns:
                 conn.execute("ALTER TABLE complaints ADD COLUMN photo_path TEXT")
+            if "location_address" not in columns:
+                conn.execute("ALTER TABLE complaints ADD COLUMN location_address TEXT")
             if "latitude" not in columns:
                 conn.execute("ALTER TABLE complaints ADD COLUMN latitude REAL")
             if "longitude" not in columns:
@@ -369,6 +405,18 @@ def setup_database():
                 conn.execute("ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP")
                 conn.execute("UPDATE complaints SET updated_at = created_at WHERE updated_at IS NULL")
             conn.execute("UPDATE complaints SET verified_category = NULL WHERE TRIM(verified_category) = ''")
+            conn.execute(
+                """
+                INSERT INTO complaint_status_history (complaint_id, status, event_type, changed_at)
+                SELECT complaints.id, complaints.status, 'baseline',
+                       COALESCE(complaints.updated_at, complaints.created_at, CURRENT_TIMESTAMP)
+                FROM complaints
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM complaint_status_history
+                    WHERE complaint_status_history.complaint_id = complaints.id
+                )
+                """
+            )
         else:
             cursor = conn.cursor()
             cursor.execute(
@@ -380,6 +428,7 @@ def setup_database():
                     title VARCHAR(150) NOT NULL,
                     description TEXT NOT NULL,
                     area VARCHAR(100) DEFAULT NULL,
+                    location_address VARCHAR(500) DEFAULT NULL,
                     predicted_category VARCHAR(50) NOT NULL,
                     confidence_score DECIMAL(5,2) NOT NULL,
                     verified_category VARCHAR(50) DEFAULT NULL,
@@ -404,18 +453,76 @@ def setup_database():
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS complaint_status_history (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    complaint_id INT NOT NULL,
+                    status VARCHAR(50) NOT NULL,
+                    event_type VARCHAR(20) NOT NULL,
+                    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_status_history_complaint_time (complaint_id, changed_at, id),
+                    CONSTRAINT fk_status_history_complaint
+                        FOREIGN KEY (complaint_id) REFERENCES complaints(id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'ticket_code'")
+            ticket_code_column = cursor.fetchone()
+            if ticket_code_column is None:
+                cursor.execute("ALTER TABLE complaints ADD COLUMN ticket_code VARCHAR(20) NULL")
+            cursor.execute(
+                """
+                SELECT id, COALESCE(YEAR(created_at), YEAR(CURRENT_DATE))
+                FROM complaints
+                WHERE ticket_code IS NULL OR TRIM(ticket_code) = ''
+                ORDER BY id
+                """
+            )
+            for complaint_id, ticket_year in cursor.fetchall():
+                cursor.execute(
+                    "UPDATE complaints SET ticket_code = %s WHERE id = %s",
+                    (f"CP-{int(ticket_year)}-L{int(complaint_id):08d}", complaint_id),
+                )
+            if ticket_code_column is None or ticket_code_column[2] == "YES":
+                cursor.execute("ALTER TABLE complaints MODIFY ticket_code VARCHAR(20) NOT NULL")
+            cursor.execute(
+                "SHOW INDEX FROM complaints WHERE Column_name = 'ticket_code' AND Non_unique = 0"
+            )
             if cursor.fetchone() is None:
-                cursor.execute("ALTER TABLE complaints ADD COLUMN ticket_code VARCHAR(20) UNIQUE NOT NULL")
+                cursor.execute(
+                    "CREATE UNIQUE INDEX uq_complaints_ticket_code ON complaints(ticket_code)"
+                )
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'photo_path'")
             if cursor.fetchone() is None:
                 cursor.execute("ALTER TABLE complaints ADD COLUMN photo_path VARCHAR(255) DEFAULT NULL")
+            cursor.execute("SHOW COLUMNS FROM complaints LIKE 'location_address'")
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE complaints ADD COLUMN location_address VARCHAR(500) DEFAULT NULL")
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'latitude'")
             if cursor.fetchone() is None:
                 cursor.execute("ALTER TABLE complaints ADD COLUMN latitude DECIMAL(10,7) NULL")
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'longitude'")
             if cursor.fetchone() is None:
                 cursor.execute("ALTER TABLE complaints ADD COLUMN longitude DECIMAL(10,7) NULL")
+            cursor.execute("SHOW COLUMNS FROM complaints LIKE 'updated_at'")
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    "ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP "
+                    "DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+                )
+            cursor.execute(
+                """
+                INSERT INTO complaint_status_history (complaint_id, status, event_type, changed_at)
+                SELECT complaints.id, complaints.status, 'baseline',
+                       COALESCE(complaints.updated_at, complaints.created_at, CURRENT_TIMESTAMP)
+                FROM complaints
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM complaint_status_history
+                    WHERE complaint_status_history.complaint_id = complaints.id
+                )
+                """
+            )
             conn.commit()
             cursor.close()
         conn.commit()
@@ -471,8 +578,8 @@ def init_db_command():
     print("Database CivicPulse berhasil diinisialisasi.")
 
 
-# Auto-init hanya di mode Non-Production jika database SQLite belum ada
-if os.getenv("FLASK_ENV", "").lower() != "production" and not os.path.exists(DB_PATH) and not os.getenv("MYSQL_HOST"):
+# Idempotent setup/migrations for the local SQLite development database.
+if os.getenv("FLASK_ENV", "").lower() != "production" and not os.getenv("MYSQL_HOST"):
     setup_database()
     init_default_admin()
 
@@ -506,6 +613,7 @@ def index():
         judul = request.form.get("title", "").strip()
         deskripsi = request.form.get("description", "").strip()
         area = request.form.get("area", "").strip()
+        location_address = request.form.get("location_address", "").strip()[:500] or None
         raw_latitude = request.form.get("latitude", "")
         raw_longitude = request.form.get("longitude", "")
 
@@ -519,6 +627,8 @@ def index():
 
         latitude = parse_nullable_float(raw_latitude, -90, 90)
         longitude = parse_nullable_float(raw_longitude, -180, 180)
+        if latitude is None or longitude is None:
+            location_address = None
 
         # NLP Inference
         teks_gabungan = bersihkan_input(f"{judul}. {deskripsi}")
@@ -533,7 +643,11 @@ def index():
         try:
             # Check Image Upload
             if "photo" in request.files:
-                photo_path = process_photo(request.files["photo"])
+                try:
+                    photo_path = process_photo(request.files["photo"])
+                except ValueError as error:
+                    flash(str(error), "warning")
+                    return redirect(url_for("index"))
 
             # Spatial Duplicate Check
             duplicate_ticket = check_duplication(conn, latitude, longitude, kode_kategori)
@@ -547,20 +661,22 @@ def index():
                 cursor.execute(
                     """
                     INSERT INTO complaints
-                    (ticket_code, reporter_name, title, description, area, predicted_category, confidence_score, status, latitude, longitude, photo_path)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (ticket_code, reporter_name, title, description, area, location_address, predicted_category, confidence_score, status, latitude, longitude, photo_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (ticket_code, nama, judul, deskripsi, area, kode_kategori, confidence, status_awal, latitude, longitude, photo_path),
+                    (ticket_code, nama, judul, deskripsi, area, location_address, kode_kategori, confidence, status_awal, latitude, longitude, photo_path),
                 )
             else:
                 cursor.execute(
                     """
                     INSERT INTO complaints
-                    (ticket_code, reporter_name, title, description, area, predicted_category, confidence_score, status, latitude, longitude, photo_path)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (ticket_code, reporter_name, title, description, area, location_address, predicted_category, confidence_score, status, latitude, longitude, photo_path)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (ticket_code, nama, judul, deskripsi, area, kode_kategori, confidence, status_awal, latitude, longitude, photo_path),
+                    (ticket_code, nama, judul, deskripsi, area, location_address, kode_kategori, confidence, status_awal, latitude, longitude, photo_path),
                 )
+            complaint_id = cursor.lastrowid
+            record_status_event(conn, complaint_id, status_awal, "submitted")
             conn.commit()
         finally:
             conn.close()
@@ -614,10 +730,35 @@ def api_tiket(ticket_code):
             row = cursor.fetchone()
             if row:
                 row = dict(row)
+                cursor.execute(
+                    """
+                    SELECT status, event_type, changed_at
+                    FROM complaint_status_history
+                    WHERE complaint_id = ?
+                    ORDER BY changed_at, id
+                    """,
+                    (row["id"],),
+                )
+                timeline = [dict(item) for item in cursor.fetchall()]
+            else:
+                timeline = []
         else:
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT * FROM complaints WHERE ticket_code = %s", (ticket_code,))
             row = cursor.fetchone()
+            if row:
+                cursor.execute(
+                    """
+                    SELECT status, event_type, changed_at
+                    FROM complaint_status_history
+                    WHERE complaint_id = %s
+                    ORDER BY changed_at, id
+                    """,
+                    (row["id"],),
+                )
+                timeline = cursor.fetchall()
+            else:
+                timeline = []
     finally:
         conn.close()
 
@@ -641,6 +782,14 @@ def api_tiket(ticket_code):
             "status": row["status"],
             "created_at": format_wita(row["created_at"]),
             "updated_at": format_wita(row["updated_at"]),
+            "timeline": [
+                {
+                    "status": item["status"],
+                    "event_type": item["event_type"],
+                    "changed_at": format_wita(item["changed_at"]),
+                }
+                for item in timeline
+            ],
         }
     })
 
@@ -732,6 +881,30 @@ def admin_dashboard():
     )
 
 
+@app.route("/admin/laporan/<int:complaint_id>/foto")
+@admin_required
+def admin_photo(complaint_id):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        if isinstance(conn, sqlite3.Connection):
+            cursor.execute("SELECT photo_path FROM complaints WHERE id = ?", (complaint_id,))
+            row = cursor.fetchone()
+        else:
+            cursor.execute("SELECT photo_path FROM complaints WHERE id = %s", (complaint_id,))
+            row = cursor.fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        abort(404)
+    photo_path = row["photo_path"] if isinstance(row, dict) else row[0]
+    filename = os.path.basename(photo_path or "")
+    if not re.fullmatch(r"[a-f0-9]{32}\.(?:jpg|webp)", filename):
+        abort(404)
+    return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=False, max_age=0)
+
+
 @app.route("/admin/verifikasi/<int:complaint_id>", methods=["POST"])
 @admin_required
 def verifikasi_laporan(complaint_id):
@@ -748,9 +921,24 @@ def verifikasi_laporan(complaint_id):
     try:
         cursor = conn.cursor()
         if isinstance(conn, sqlite3.Connection):
-            cursor.execute("UPDATE complaints SET verified_category = ?, status = ? WHERE id = ?", (kategori_baru, status_baru, complaint_id))
+            cursor.execute("SELECT status FROM complaints WHERE id = ?", (complaint_id,))
+            current = cursor.fetchone()
+            if current is None:
+                abort(404)
+            previous_status = current["status"]
+            cursor.execute(
+                "UPDATE complaints SET verified_category = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (kategori_baru, status_baru, complaint_id),
+            )
         else:
+            cursor.execute("SELECT status FROM complaints WHERE id = %s", (complaint_id,))
+            current = cursor.fetchone()
+            if current is None:
+                abort(404)
+            previous_status = current[0]
             cursor.execute("UPDATE complaints SET verified_category = %s, status = %s WHERE id = %s", (kategori_baru, status_baru, complaint_id))
+        if previous_status != status_baru:
+            record_status_event(conn, complaint_id, status_baru, "status_change")
         conn.commit()
     finally:
         conn.close()
