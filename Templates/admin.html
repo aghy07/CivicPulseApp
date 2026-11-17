@@ -9,6 +9,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/civicpulse.css') }}">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
     <style>
         .topbar {
             min-height: 72px;
@@ -88,6 +90,7 @@
         .filters { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
         .filter-field { display: grid; min-width: 190px; gap: 5px; }
         .filter-field label { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+        .filter-field.search-field { flex: 1 1 260px; }
         select {
             min-height: 36px;
             padding: 7px 28px 7px 9px;
@@ -97,6 +100,16 @@
             color: var(--ink);
             font-size: 12px;
         }
+        .filter-field input {
+            min-height: 36px;
+            padding: 7px 9px;
+            border: 1px solid #CFCFCA;
+            border-radius: 6px;
+            background: #fff;
+            color: var(--ink);
+            font-size: 12px;
+        }
+        .filter-field input:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px rgba(24,49,83,.1); }
         select:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px rgba(24,49,83,.1); }
         .table-scroll { overflow-x: auto; }
         .table-wrap { position: relative; min-height: 100px; }
@@ -115,19 +128,20 @@
         table { width: 100%; min-width: 950px; border-collapse: collapse; text-align: left; }
         th, td { padding: 10px 11px; border-bottom: 1px solid var(--border); vertical-align: top; }
         th { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-        td { font-size: 11px; }
+        td { font-size: 13px; }
         tbody tr { border-left: 2px solid transparent; transition: background 180ms ease, border-color 180ms ease; }
         tbody tr:hover { background: #F8FAFC; border-left-color: var(--navy); }
         .report-id { font: 500 11px var(--mono); white-space: nowrap; }
+        .report-ticket { display: block; margin-top: 3px; color: var(--muted); font: 9px var(--mono); white-space: nowrap; }
         .report-name { font-weight: 600; }
-        .secondary-text { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+        .secondary-text { display: block; margin-top: 3px; color: var(--muted); font-size: 11.5px; }
         .report-photo-link { display: inline-flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--navy); font-size: 10px; font-weight: 600; }
         .report-photo-link:hover { text-decoration: underline; text-underline-offset: 3px; }
         .report-photo { width: 52px; height: 40px; object-fit: cover; border: 1px solid var(--border); border-radius: 4px; background: #ECECE8; }
         .action-cell { min-width: 220px; }
         .verify-form { display: grid; gap: 7px; min-width: 205px; }
         .verify-form select { width: 100%; min-height: 31px; font-size: 10px; }
-        .form-actions { display: flex; gap: 6px; align-items: center; }
+        .form-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
         .action-button, .map-button {
             min-height: 30px;
             padding: 6px 9px;
@@ -144,6 +158,47 @@
         .action-button:active, .map-button:active { transform: scale(.985); }
         .map-button { border-color: var(--border); background: #fff; color: var(--navy); }
         .map-button:hover { border-color: var(--navy); background: #F7F7F5; }
+        .external-map-link { display: inline-flex; align-items: center; text-decoration: none; }
+        .map-button.is-active { border-color: var(--navy); background: #DBEAFE; color: var(--navy); }
+        .is-highlighted { background: #DBEAFE !important; border-left-color: var(--navy) !important; }
+        .fill[data-category="jalan_rusak"] { background: #dc2626; }
+        .fill[data-category="kebersihan_dan_drainase"] { background: #ea580c; }
+        .fill[data-category="taman_penataan_lingkungan"] { background: #16a34a; }
+        .fill[data-category="utilitas_air_pdam"] { background: #0284c7; }
+        .fill[data-category="utilitas_listrik"] { background: #d97706; }
+        .toast {
+            position: fixed;
+            z-index: 3000;
+            right: 20px;
+            bottom: 20px;
+            max-width: min(420px, calc(100vw - 40px));
+            padding: 12px 16px;
+            border: 1px solid var(--green-border);
+            border-left: 3px solid #15803D;
+            border-radius: 6px;
+            background: var(--green-bg);
+            color: var(--green);
+            box-shadow: 0 8px 20px -6px rgba(20, 21, 23, .18);
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(8px);
+            transition: opacity 180ms ease, transform 180ms ease;
+        }
+        .toast.is-visible { opacity: 1; transform: translateY(0); }
+        .toast.is-error { border-color: #FECACA; border-left-color: #B91C1C; background: #FEF2F2; color: #7F1D1D; }
+        .photo-dialog {
+            width: min(1000px, calc(100vw - 32px));
+            max-width: none;
+            max-height: calc(100vh - 32px);
+            padding: 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #fff;
+            color: var(--ink);
+        }
+        .photo-dialog::backdrop { background: rgba(20, 21, 23, .72); }
+        .photo-dialog form { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+        .photo-dialog img { display: block; max-width: 100%; max-height: calc(100vh - 100px); margin: 0 auto; object-fit: contain; }
         .empty-cell { padding: 24px; color: var(--muted); text-align: center; }
         .status-pill { font-size: 10px; }
         .custom-div-icon { border: 0; background: transparent; }
@@ -163,7 +218,8 @@
             .kpi-value { font-size: 23px; }
             .panel { padding: 14px; }
             #admin-map { height: 280px; }
-            .filter-field { min-width: 100%; }
+            .filter-field, .filter-field.search-field { min-width: 100%; }
+            .toast { right: 12px; bottom: 12px; max-width: calc(100vw - 24px); }
         }
     </style>
 </head>
@@ -202,10 +258,10 @@
         </section>
 
         <section class="kpis" aria-label="Ringkasan laporan">
-            <article class="kpi"><span class="kpi-label">Total laporan</span><strong class="kpi-value">{{ ringkasan.total }}</strong></article>
-            <article class="kpi"><span class="kpi-label">Menunggu verifikasi</span><strong class="kpi-value">{{ ringkasan.menunggu }}</strong></article>
-            <article class="kpi"><span class="kpi-label">Dalam proses</span><strong class="kpi-value">{{ ringkasan.proses }}</strong></article>
-            <article class="kpi"><span class="kpi-label">Selesai</span><strong class="kpi-value">{{ ringkasan.selesai }}</strong></article>
+            <article class="kpi" data-kpi="total"><span class="kpi-label">Total laporan</span><strong class="kpi-value">{{ ringkasan.total }}</strong></article>
+            <article class="kpi" data-kpi="menunggu"><span class="kpi-label">Menunggu verifikasi</span><strong class="kpi-value">{{ ringkasan.menunggu }}</strong></article>
+            <article class="kpi" data-kpi="proses"><span class="kpi-label">Dalam proses</span><strong class="kpi-value">{{ ringkasan.proses }}</strong></article>
+            <article class="kpi" data-kpi="selesai"><span class="kpi-label">Selesai</span><strong class="kpi-value">{{ ringkasan.selesai }}</strong></article>
         </section>
 
         {% set totals = namespace(count=0) %}
@@ -233,13 +289,13 @@
                     <h2>Ringkasan kategori</h2>
                     <span class="panel-note">{{ totals.count }} laporan</span>
                 </div>
-                <div class="distribution">
+                <div class="distribution" id="category-summary">
                     {% if statistik %}
                         {% for item in statistik %}
                             {% set share = ((item.total / totals.count) * 100) if totals.count else 0 %}
                             <div class="distribution-row">
                                 <div class="distribution-meta"><span>{{ label_map.get(item.kategori, item.kategori) }}</span><strong>{{ item.total }}</strong></div>
-                                <div class="track"><div class="fill" style="width: {{ share }}%"></div></div>
+                                <div class="track"><div class="fill" data-category="{{ item.kategori }}" style="width: {{ share }}%"></div></div>
                             </div>
                         {% endfor %}
                     {% else %}
@@ -277,6 +333,11 @@
                         <option value="Selesai">Selesai</option>
                     </select>
                 </div>
+                <div class="filter-field search-field">
+                    <label for="filter-search">Cari laporan</label>
+                    <input id="filter-search" type="search" placeholder="ID, kode tiket, nama pelapor, atau judul">
+                </div>
+                <button class="map-button" type="button" id="review-filter" aria-pressed="false">Perlu Tinjauan (&lt; 60%) <span id="review-count"></span></button>
                 <button class="map-button" type="button" id="clear-filters">Hapus filter</button>
             </div>
             <div class="table-wrap" id="table-wrap">
@@ -288,8 +349,8 @@
                         <tbody id="report-table-body">
                             {% for item in laporan %}
                                 {% set final_category = item.verified_category or item.predicted_category %}
-                                <tr data-category="{{ final_category }}" data-status="{{ item.status }}" data-latitude="{{ item.latitude if item.latitude is not none else '' }}" data-longitude="{{ item.longitude if item.longitude is not none else '' }}">
-                                    <td><span class="report-id">#{{ item.id }}</span><span class="secondary-text technical">{{ item.created_at }}</span></td>
+                                <tr id="report-row-{{ item.id }}" data-report-id="{{ item.id }}" data-category="{{ final_category }}" data-status="{{ item.status }}" data-confidence="{{ item.confidence_score }}" data-search="{{ item.id }} {{ item.ticket_code }} {{ item.reporter_name }} {{ item.title }}" data-latitude="{{ item.latitude if item.latitude is not none else '' }}" data-longitude="{{ item.longitude if item.longitude is not none else '' }}">
+                                    <td><span class="report-id">#{{ item.id }}</span><span class="report-ticket technical">{{ item.ticket_code }}</span><span class="secondary-text technical">{{ item.created_at|wita }}</span></td>
                                     <td>
                                         <span class="report-name">{{ item.title }}</span>
                                         <span class="secondary-text">{{ item.reporter_name }} · {{ item.area or 'Wilayah umum' }}</span>
@@ -326,6 +387,7 @@
                                                 <button class="action-button" type="submit">Perbarui</button>
                                                 {% if item.latitude is not none and item.longitude is not none %}
                                                     <button class="map-button view-on-map" type="button" data-latitude="{{ item.latitude }}" data-longitude="{{ item.longitude }}">Lihat di Peta</button>
+                                                    <a class="map-button external-map-link" href="https://www.google.com/maps?q={{ item.latitude }},{{ item.longitude }}" target="_blank" rel="noopener noreferrer">Google Maps ↗</a>
                                                 {% endif %}
                                             </div>
                                         </form>
@@ -341,7 +403,14 @@
         </section>
     </main>
 
+    <dialog class="photo-dialog" id="photo-dialog" aria-label="Pratinjau foto bukti">
+        <form method="dialog"><button class="map-button" type="submit">Tutup</button></form>
+        <img id="photo-dialog-image" alt="">
+    </dialog>
+    <div class="toast" id="admin-toast" role="status" aria-live="polite"></div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script>
         const defaultCenter = [-3.9985, 122.5129];
         const geoData = {{ laporan_geo|tojson|safe }};
@@ -385,7 +454,7 @@
             gmaps.href = `https://www.google.com/maps?q=${encodeURIComponent(item.latitude)},${encodeURIComponent(item.longitude)}`;
             gmaps.target = '_blank';
             gmaps.rel = 'noopener noreferrer';
-            gmaps.textContent = 'Buka di Google Maps';
+            gmaps.textContent = 'Google Maps ↗';
             gmaps.style.display = 'block';
             gmaps.style.marginTop = '8px';
             gmaps.style.fontSize = '10px';
@@ -406,6 +475,9 @@
             window.setTimeout(hideMapSkeleton, 1500);
 
             const markersById = new Map();
+            const markerCluster = typeof L.markerClusterGroup === 'function'
+                ? L.markerClusterGroup({ chunkedLoading: true })
+                : L.featureGroup();
             const points = [];
             geoData.forEach(function (item) {
                 const latitude = Number(item.latitude);
@@ -413,12 +485,17 @@
                 if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
                 const marker = L.marker([latitude, longitude], {
                     icon: markerIcon(markerColors[item.kategori] || '#183153')
-                }).addTo(map);
+                });
+                marker.on('click', function () {
+                    highlightRow(item.id);
+                });
                 bindPopup(marker, item);
                 markersById.set(String(item.id), marker);
+                markerCluster.addLayer(marker);
                 points.push([latitude, longitude]);
             });
-            if (points.length) map.fitBounds(L.latLngBounds(points).pad(0.2));
+            map.addLayer(markerCluster);
+            if (points.length) map.fitBounds(markerCluster.getBounds().pad(0.2));
 
             document.querySelectorAll('.view-on-map').forEach(function (button) {
                 button.addEventListener('click', function () {
@@ -426,9 +503,19 @@
                     const longitude = Number(button.dataset.longitude);
                     map.flyTo([latitude, longitude], 16, { duration: 0.8 });
                     const row = button.closest('tr');
-                    const reportId = row ? row.querySelector('.report-id').textContent.replace('#', '') : '';
+                    const reportId = row ? row.dataset.reportId : '';
                     const marker = markersById.get(reportId);
-                    if (marker) window.setTimeout(() => marker.openPopup(), 850);
+                    if (marker) {
+                        window.setTimeout(function () {
+                            if (typeof markerCluster.zoomToShowLayer === 'function') {
+                                markerCluster.zoomToShowLayer(marker, function () {
+                                    marker.openPopup();
+                                });
+                            } else {
+                                marker.openPopup();
+                            }
+                        }, 850);
+                    }
                     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                     document.getElementById('admin-map').scrollIntoView({
                         behavior: reduceMotion ? 'auto' : 'smooth',
@@ -439,9 +526,14 @@
 
             const categoryFilter = document.getElementById('filter-category');
             const statusFilter = document.getElementById('filter-status');
+            const searchFilter = document.getElementById('filter-search');
+            const reviewFilter = document.getElementById('review-filter');
             const tableWrap = document.getElementById('table-wrap');
             const rows = Array.from(document.querySelectorAll('#report-table-body tr[data-category]'));
+            const highlightTimers = new Map();
             let filterTimer;
+            let toastTimer;
+            let reviewOnly = false;
 
             function applyFilters() {
                 window.clearTimeout(filterTimer);
@@ -449,18 +541,24 @@
                 filterTimer = window.setTimeout(function () {
                     const selectedCategory = categoryFilter.value;
                     const selectedStatus = statusFilter.value;
+                    const searchTerm = searchFilter.value.trim().toLocaleLowerCase('id');
                     let visibleCount = 0;
 
                     rows.forEach(function (row) {
                         const categoryMatches = !selectedCategory || row.dataset.category === selectedCategory;
                         const statusMatches = !selectedStatus || row.dataset.status === selectedStatus;
-                        const isVisible = categoryMatches && statusMatches;
+                        const searchMatches = !searchTerm || row.dataset.search.toLocaleLowerCase('id').includes(searchTerm);
+                        const needsReview = Number(row.dataset.confidence) < 60 || row.dataset.status === 'Menunggu Verifikasi';
+                        const reviewMatches = !reviewOnly || needsReview;
+                        const isVisible = categoryMatches && statusMatches && searchMatches && reviewMatches;
                         row.hidden = !isVisible;
                         if (isVisible) visibleCount++;
                     });
 
+                    const initialEmptyRow = document.querySelector('#report-table-body .empty-row');
+                    if (initialEmptyRow) initialEmptyRow.hidden = rows.length > 0;
                     let emptyMsg = document.getElementById('filter-empty-msg');
-                    if (visibleCount === 0) {
+                    if (visibleCount === 0 && rows.length > 0) {
                         if (!emptyMsg) {
                             emptyMsg = document.createElement('tr');
                             emptyMsg.id = 'filter-empty-msg';
@@ -476,13 +574,194 @@
                 }, 180);
             }
 
+            function updateReviewCount() {
+                const count = rows.filter(function (row) {
+                    return Number(row.dataset.confidence) < 60 || row.dataset.status === 'Menunggu Verifikasi';
+                }).length;
+                document.getElementById('review-count').textContent = `(${count})`;
+            }
+
+            function highlightRow(reportId) {
+                const row = document.getElementById(`report-row-${reportId}`);
+                if (!row) return;
+                window.clearTimeout(highlightTimers.get(String(reportId)));
+                row.hidden = false;
+                row.classList.add('is-highlighted');
+                row.scrollIntoView({
+                    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+                    block: 'center'
+                });
+                highlightTimers.set(String(reportId), window.setTimeout(function () {
+                    row.classList.remove('is-highlighted');
+                    highlightTimers.delete(String(reportId));
+                    applyFilters();
+                }, 2500));
+            }
+
+            function updateKpis(summary) {
+                Object.keys(summary).forEach(function (key) {
+                    const value = document.querySelector(`[data-kpi="${key}"] .kpi-value`);
+                    if (value) value.textContent = summary[key];
+                });
+            }
+
+            function updateCategorySummary(statistics) {
+                const summary = document.getElementById('category-summary');
+                summary.replaceChildren();
+                const total = statistics.reduce(function (sum, item) {
+                    return sum + item.total;
+                }, 0);
+
+                if (!statistics.length) {
+                    const empty = document.createElement('p');
+                    empty.className = 'panel-note';
+                    empty.textContent = 'Belum ada data kategori.';
+                    summary.appendChild(empty);
+                    return;
+                }
+
+                statistics.forEach(function (item) {
+                    const row = document.createElement('div');
+                    row.className = 'distribution-row';
+                    const meta = document.createElement('div');
+                    meta.className = 'distribution-meta';
+                    const label = document.createElement('span');
+                    label.textContent = item.label;
+                    const count = document.createElement('strong');
+                    count.textContent = item.total;
+                    meta.append(label, count);
+
+                    const track = document.createElement('div');
+                    track.className = 'track';
+                    const fill = document.createElement('div');
+                    fill.className = 'fill';
+                    fill.dataset.category = item.kategori;
+                    fill.style.width = `${total ? (item.total / total) * 100 : 0}%`;
+                    track.appendChild(fill);
+                    row.append(meta, track);
+                    summary.appendChild(row);
+                });
+            }
+
+            function showToast(message, isError) {
+                const toast = document.getElementById('admin-toast');
+                window.clearTimeout(toastTimer);
+                toast.textContent = message;
+                toast.classList.toggle('is-error', Boolean(isError));
+                toast.classList.add('is-visible');
+                toastTimer = window.setTimeout(function () {
+                    toast.classList.remove('is-visible');
+                }, 3200);
+            }
+
+            function updateStatusPill(pill, status) {
+                pill.className = 'status-pill';
+                if (status === 'Terverifikasi') pill.classList.add('verified');
+                else if (status === 'Selesai') pill.classList.add('complete');
+                else if (status === 'Menunggu Verifikasi') pill.classList.add('pending');
+                else if (status === 'Dalam Tindak Lanjut') pill.classList.add('progress');
+                pill.textContent = status;
+            }
+
+            document.querySelectorAll('.verify-form').forEach(function (form) {
+                form.addEventListener('submit', async function (event) {
+                    event.preventDefault();
+                    const button = form.querySelector('button[type="submit"]');
+                    const originalText = button.textContent;
+                    const row = form.closest('tr');
+                    button.disabled = true;
+                    button.textContent = 'Memperbarui...';
+
+                    try {
+                        const response = await fetch(form.action, {
+                            method: 'POST',
+                            headers: {
+                                Accept: 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'X-CSRFToken': form.querySelector('[name="csrf_token"]').value
+                            },
+                            body: new FormData(form),
+                            credentials: 'same-origin'
+                        });
+                        let result;
+                        try {
+                            result = await response.json();
+                        } catch (error) {
+                            throw new Error('Server tidak mengembalikan respons JSON yang valid.');
+                        }
+                        if (!response.ok || !result.ok) {
+                            throw new Error(result.message || 'Pembaruan laporan gagal.');
+                        }
+
+                        row.dataset.category = result.final_category;
+                        row.dataset.status = result.status;
+                        row.cells[2].textContent = result.final_category_label;
+                        updateStatusPill(row.cells[4].querySelector('.status-pill'), result.status);
+                        updateKpis(result.ringkasan);
+                        updateCategorySummary(result.statistik);
+                        updateReviewCount();
+
+                        const marker = markersById.get(String(result.complaint_id));
+                        const mapItem = geoData.find(function (item) {
+                            return String(item.id) === String(result.complaint_id);
+                        });
+                        if (mapItem) {
+                            mapItem.kategori = result.final_category;
+                            mapItem.status = result.status;
+                        }
+                        if (marker && mapItem) {
+                            marker.setIcon(markerIcon(markerColors[result.final_category] || '#183153'));
+                            bindPopup(marker, mapItem);
+                        }
+                        applyFilters();
+                        showToast(`Laporan #${result.complaint_id} berhasil diperbarui.`, false);
+                    } catch (error) {
+                        showToast(error.message || 'Tidak dapat memperbarui laporan.', true);
+                    } finally {
+                        button.disabled = false;
+                        button.textContent = originalText;
+                    }
+                });
+            });
+
+            const photoDialog = document.getElementById('photo-dialog');
+            const photoDialogImage = document.getElementById('photo-dialog-image');
+            document.querySelectorAll('.report-photo-link').forEach(function (link) {
+                link.addEventListener('click', function (event) {
+                    if (typeof photoDialog.showModal !== 'function') return;
+                    event.preventDefault();
+                    const thumbnail = link.querySelector('img');
+                    photoDialogImage.src = link.href;
+                    photoDialogImage.alt = thumbnail ? thumbnail.alt : 'Foto bukti laporan';
+                    photoDialog.showModal();
+                });
+            });
+            photoDialog.addEventListener('close', function () {
+                photoDialogImage.removeAttribute('src');
+            });
+            photoDialog.addEventListener('click', function (event) {
+                if (event.target === photoDialog) photoDialog.close();
+            });
+
             categoryFilter.addEventListener('change', applyFilters);
             statusFilter.addEventListener('change', applyFilters);
+            searchFilter.addEventListener('input', applyFilters);
+            reviewFilter.addEventListener('click', function () {
+                reviewOnly = !reviewOnly;
+                reviewFilter.setAttribute('aria-pressed', String(reviewOnly));
+                reviewFilter.classList.toggle('is-active', reviewOnly);
+                applyFilters();
+            });
             document.getElementById('clear-filters').addEventListener('click', function () {
                 categoryFilter.value = '';
                 statusFilter.value = '';
+                searchFilter.value = '';
+                reviewOnly = false;
+                reviewFilter.setAttribute('aria-pressed', 'false');
+                reviewFilter.classList.remove('is-active');
                 applyFilters();
             });
+            updateReviewCount();
         });
     </script>
 </body>

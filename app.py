@@ -881,6 +881,53 @@ def admin_dashboard():
     )
 
 
+def get_admin_live_summary(conn):
+    if isinstance(conn, sqlite3.Connection):
+        cursor = conn.cursor()
+        cursor.execute("SELECT status, COUNT(*) AS total FROM complaints GROUP BY status")
+        status_rows = [dict(row) for row in cursor.fetchall()]
+        cursor.execute(
+            """
+            SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total
+            FROM complaints
+            GROUP BY kategori
+            ORDER BY kategori
+            """
+        )
+        category_rows = [dict(row) for row in cursor.fetchall()]
+    else:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT status, COUNT(*) AS total FROM complaints GROUP BY status")
+        status_rows = cursor.fetchall()
+        cursor.execute(
+            """
+            SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total
+            FROM complaints
+            GROUP BY kategori
+            ORDER BY kategori
+            """
+        )
+        category_rows = cursor.fetchall()
+    cursor.close()
+
+    counts = {row["status"]: int(row["total"]) for row in status_rows}
+    summary = {
+        "total": sum(counts.values()),
+        "menunggu": counts.get("Menunggu Verifikasi", 0),
+        "proses": counts.get("Terverifikasi", 0) + counts.get("Dalam Tindak Lanjut", 0),
+        "selesai": counts.get("Selesai", 0),
+    }
+    statistics = [
+        {
+            "kategori": row["kategori"],
+            "label": LABEL_TAMPILAN.get(row["kategori"], row["kategori"]),
+            "total": int(row["total"]),
+        }
+        for row in category_rows
+    ]
+    return summary, statistics
+
+
 @app.route("/admin/laporan/<int:complaint_id>/foto")
 @admin_required
 def admin_photo(complaint_id):
@@ -911,6 +958,11 @@ def verifikasi_laporan(complaint_id):
     kategori_baru = request.form.get("verified_category") or None
     status_baru = request.form.get("status", "Terverifikasi")
     allowed_statuses = {"Menunggu Verifikasi", "Terverifikasi", "Dalam Tindak Lanjut", "Selesai"}
+    accept_header = request.headers.get("Accept", "").lower()
+    wants_json = (
+        "application/json" in accept_header
+        or request.headers.get("X-Requested-With", "").lower() == "xmlhttprequest"
+    )
 
     if kategori_baru is not None and kategori_baru not in LABEL_TAMPILAN:
         abort(400)
@@ -921,27 +973,51 @@ def verifikasi_laporan(complaint_id):
     try:
         cursor = conn.cursor()
         if isinstance(conn, sqlite3.Connection):
-            cursor.execute("SELECT status FROM complaints WHERE id = ?", (complaint_id,))
+            cursor.execute(
+                "SELECT status, predicted_category FROM complaints WHERE id = ?",
+                (complaint_id,),
+            )
             current = cursor.fetchone()
             if current is None:
                 abort(404)
             previous_status = current["status"]
+            predicted_category = current["predicted_category"]
             cursor.execute(
                 "UPDATE complaints SET verified_category = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (kategori_baru, status_baru, complaint_id),
             )
         else:
-            cursor.execute("SELECT status FROM complaints WHERE id = %s", (complaint_id,))
+            cursor.execute(
+                "SELECT status, predicted_category FROM complaints WHERE id = %s",
+                (complaint_id,),
+            )
             current = cursor.fetchone()
             if current is None:
                 abort(404)
             previous_status = current[0]
+            predicted_category = current[1]
             cursor.execute("UPDATE complaints SET verified_category = %s, status = %s WHERE id = %s", (kategori_baru, status_baru, complaint_id))
         if previous_status != status_baru:
             record_status_event(conn, complaint_id, status_baru, "status_change")
         conn.commit()
+        if wants_json:
+            summary, statistics = get_admin_live_summary(conn)
     finally:
         conn.close()
+
+    if wants_json:
+        final_category = kategori_baru or predicted_category
+        return jsonify(
+            {
+                "ok": True,
+                "complaint_id": complaint_id,
+                "final_category": final_category,
+                "final_category_label": LABEL_TAMPILAN.get(final_category, final_category),
+                "status": status_baru,
+                "ringkasan": summary,
+                "statistik": statistics,
+            }
+        )
 
     flash(f"Laporan #{complaint_id} berhasil diperbarui.", "success")
     return redirect(url_for("admin_dashboard"))
