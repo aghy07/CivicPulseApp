@@ -384,10 +384,10 @@
                         <div class="map-skeleton skeleton-shimmer" id="public-map-skeleton" aria-hidden="true"></div>
                     </div>
                     <div class="legend" aria-label="Legenda kategori">
-                        <span class="legend-item"><i class="legend-dot" style="background:#dc2626"></i>Jalan</span>
-                        <span class="legend-item"><i class="legend-dot" style="background:#ea580c"></i>Kebersihan</span>
-                        <span class="legend-item"><i class="legend-dot" style="background:#16a34a"></i>Taman</span>
-                        <span class="legend-item"><i class="legend-dot" style="background:#d97706"></i>Listrik &amp; PJU</span>
+                        <span class="legend-item"><i class="legend-dot" data-category="jalan_rusak"></i>Jalan</span>
+                        <span class="legend-item"><i class="legend-dot" data-category="kebersihan_dan_drainase"></i>Kebersihan</span>
+                        <span class="legend-item"><i class="legend-dot" data-category="taman_penataan_lingkungan"></i>Taman</span>
+                        <span class="legend-item"><i class="legend-dot" data-category="utilitas_listrik_dan_pju"></i>Listrik &amp; PJU</span>
                     </div>
                 </article>
                 <article class="panel">
@@ -399,18 +399,12 @@
                         {% if statistik %}
                             {% for item in statistik %}
                                 {% set share = ((item.total / totals.count) * 100) if totals.count else 0 %}
-                                {% set category_colors = {
-                                    'jalan_rusak': '#dc2626',
-                                    'kebersihan_dan_drainase': '#ea580c',
-                                    'taman_penataan_lingkungan': '#16a34a',
-                                    'utilitas_listrik_dan_pju': '#d97706'
-                                } %}
                                 <div class="category-row">
                                     <div class="category-meta">
                                         <span>{{ label_map.get(item.kategori, item.kategori) }}</span>
                                         <strong>{{ item.total }}</strong>
                                     </div>
-                                    <div class="progress-track"><div class="progress-fill" style="width: {{ share }}%; background-color: {{ category_colors.get(item.kategori, '#183153') }}"></div></div>
+                                    <div class="progress-track"><div class="progress-fill" data-category="{{ item.kategori }}" style="width: {{ share }}%"></div></div>
                                 </div>
                             {% endfor %}
                         {% else %}
@@ -459,11 +453,11 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script>
         const defaultCenter = [-3.9985, 122.5129];
-        const markerColors = {
-            jalan_rusak: '#dc2626',
-            kebersihan_dan_drainase: '#ea580c',
-            taman_penataan_lingkungan: '#16a34a',
-            utilitas_listrik_dan_pju: '#d97706'
+        const markerClasses = {
+            jalan_rusak: 'marker-dot--jalan-rusak',
+            kebersihan_dan_drainase: 'marker-dot--cleanliness',
+            taman_penataan_lingkungan: 'marker-dot--park',
+            utilitas_listrik_dan_pju: 'marker-dot--electricity'
         };
         const geoData = {{ laporan_geo|tojson|safe }};
         const categoryLabels = {{ label_map|tojson|safe }};
@@ -472,10 +466,10 @@
             'Mandonga', 'Nambo', 'Poasia', 'Puuwatu', 'Wua-Wua'
         ];
 
-        function markerIcon(color) {
+        function markerIcon(category) {
             return L.divIcon({
                 className: 'custom-div-icon',
-                html: `<span style="background:${color}"></span>`,
+                html: `<span class="${markerClasses[category] || 'marker-dot--default'}"></span>`,
                 iconSize: [16, 16],
                 iconAnchor: [8, 8]
             });
@@ -712,7 +706,7 @@
                 const lng = Number(item.longitude);
                 if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
                 const marker = L.marker([lat, lng], {
-                    icon: markerIcon(markerColors[item.kategori] || '#183153')
+                    icon: markerIcon(item.kategori)
                 });
                 bindReportPopup(marker, item);
                 markerCluster.addLayer(marker);

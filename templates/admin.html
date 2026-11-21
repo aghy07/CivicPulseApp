@@ -161,10 +161,6 @@
         .external-map-link { display: inline-flex; align-items: center; text-decoration: none; }
         .map-button.is-active { border-color: var(--navy); background: #DBEAFE; color: var(--navy); }
         .is-highlighted { background: #DBEAFE !important; border-left-color: var(--navy) !important; }
-        .fill[data-category="jalan_rusak"] { background: #dc2626; }
-        .fill[data-category="kebersihan_dan_drainase"] { background: #ea580c; }
-        .fill[data-category="taman_penataan_lingkungan"] { background: #16a34a; }
-        .fill[data-category="utilitas_listrik_dan_pju"] { background: #d97706; }
         .toast {
             position: fixed;
             z-index: 3000;
@@ -276,10 +272,10 @@
                     <div class="map-skeleton skeleton-shimmer" id="admin-map-skeleton" aria-hidden="true"></div>
                 </div>
                 <div class="legend" aria-label="Legenda kategori peta">
-                    <span class="legend-item"><i class="legend-dot" style="background:#dc2626"></i>Jalan</span>
-                    <span class="legend-item"><i class="legend-dot" style="background:#ea580c"></i>Kebersihan</span>
-                    <span class="legend-item"><i class="legend-dot" style="background:#16a34a"></i>Taman</span>
-                    <span class="legend-item"><i class="legend-dot" style="background:#d97706"></i>Listrik</span>
+                    <span class="legend-item"><i class="legend-dot" data-category="jalan_rusak"></i>Jalan</span>
+                    <span class="legend-item"><i class="legend-dot" data-category="kebersihan_dan_drainase"></i>Kebersihan</span>
+                    <span class="legend-item"><i class="legend-dot" data-category="taman_penataan_lingkungan"></i>Taman</span>
+                    <span class="legend-item"><i class="legend-dot" data-category="utilitas_listrik_dan_pju"></i>Listrik</span>
                 </div>
             </article>
             <article class="panel">
@@ -309,7 +305,7 @@
                     <h2>Manajemen dan verifikasi laporan</h2>
                     <span class="panel-note">{{ laporan|length }} laporan</span>
                 </div>
-                <a href="{{ url_for('export_csv') }}" class="button secondary" style="background:#fff; color:var(--navy); border:1px solid var(--border); font-size:10px; display:inline-flex; align-items:center; min-height:30px;">Unduh CSV</a>
+                <a href="{{ url_for('export_csv') }}" class="button secondary export-csv-button">Unduh CSV</a>
             </div>
             <div class="filters" aria-label="Filter laporan">
                 <div class="filter-field">
@@ -413,17 +409,17 @@
         const defaultCenter = [-3.9985, 122.5129];
         const geoData = {{ laporan_geo|tojson|safe }};
         const categoryLabels = {{ label_map|tojson|safe }};
-        const markerColors = {
-            jalan_rusak: '#dc2626',
-            kebersihan_dan_drainase: '#ea580c',
-            taman_penataan_lingkungan: '#16a34a',
-            utilitas_listrik_dan_pju: '#d97706'
+        const markerClasses = {
+            jalan_rusak: 'marker-dot--jalan-rusak',
+            kebersihan_dan_drainase: 'marker-dot--cleanliness',
+            taman_penataan_lingkungan: 'marker-dot--park',
+            utilitas_listrik_dan_pju: 'marker-dot--electricity'
         };
 
-        function markerIcon(color) {
+        function markerIcon(category) {
             return L.divIcon({
                 className: 'custom-div-icon',
-                html: `<span style="background:${color}"></span>`,
+                html: `<span class="${markerClasses[category] || 'marker-dot--default'}"></span>`,
                 iconSize: [16, 16],
                 iconAnchor: [8, 8]
             });
@@ -451,12 +447,8 @@
             gmaps.href = `https://www.google.com/maps?q=${encodeURIComponent(item.latitude)},${encodeURIComponent(item.longitude)}`;
             gmaps.target = '_blank';
             gmaps.rel = 'noopener noreferrer';
+            gmaps.className = 'popup-map-link';
             gmaps.textContent = 'Google Maps ↗';
-            gmaps.style.display = 'block';
-            gmaps.style.marginTop = '8px';
-            gmaps.style.fontSize = '10px';
-            gmaps.style.color = 'var(--navy)';
-            gmaps.style.fontWeight = '600';
 
             content.append(title, details, category, status, gmaps);
             marker.bindPopup(content);
@@ -481,7 +473,7 @@
                 const longitude = Number(item.longitude);
                 if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
                 const marker = L.marker([latitude, longitude], {
-                    icon: markerIcon(markerColors[item.kategori] || '#183153')
+                    icon: markerIcon(item.kategori)
                 });
                 marker.on('click', function () {
                     highlightRow(item.id);
@@ -707,7 +699,7 @@
                             mapItem.status = result.status;
                         }
                         if (marker && mapItem) {
-                            marker.setIcon(markerIcon(markerColors[result.final_category] || '#183153'));
+                            marker.setIcon(markerIcon(result.final_category));
                             bindPopup(marker, mapItem);
                         }
                         applyFilters();

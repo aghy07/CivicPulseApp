@@ -15,6 +15,7 @@ from functools import wraps
 
 import mysql.connector
 import numpy as np
+import pytz
 import tensorflow as tf
 from PIL import Image, UnidentifiedImageError
 from flask import (
@@ -88,9 +89,15 @@ def inject_csrf_token():
 @app.before_request
 def protect_post_requests():
     if request.method == "POST":
-        submitted_token = request.form.get("csrf_token") or request.headers.get("X-CSRFToken", "")
+        submitted_token = request.form.get("csrf_token") or request.headers.get(
+            "X-CSRFToken", ""
+        )
         session_token = session.get("_csrf_token", "")
-        if not submitted_token or not session_token or not hmac.compare_digest(submitted_token, session_token):
+        if (
+            not submitted_token
+            or not session_token
+            or not hmac.compare_digest(submitted_token, session_token)
+        ):
             abort(400)
 
 
@@ -102,7 +109,8 @@ def set_security_headers(response):
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com "
+        "https://unpkg.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "connect-src 'self' https://nominatim.openstreetmap.org; "
         "img-src 'self' blob: data: https://*.tile.openstreetmap.org https://unpkg.com;"
@@ -133,13 +141,16 @@ if (
     or not isinstance(MAX_LEN, int)
     or MAX_LEN <= 0
 ):
-    raise ValueError("label_classes.json harus berisi kelas kategori CivicPulse dan max_len positif.")
+    raise ValueError(
+        "label_classes.json harus berisi kelas kategori CivicPulse dan max_len positif."
+    )
 
 with open(TOKENIZER_PATH, encoding="utf-8") as file:
     tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(file.read())
 
 
 def load_lstm_model_compat(model_path):
+    """Load a Keras model, retrying after removing null quantization metadata."""
     try:
         return tf.keras.models.load_model(model_path, compile=False)
     except (TypeError, ValueError) as error:
@@ -178,7 +189,9 @@ def load_lstm_model_compat(model_path):
                 if not strip_null_quantization_config(config):
                     raise
 
-                with tempfile.NamedTemporaryFile(suffix=".keras", delete=False) as temporary_file:
+                with tempfile.NamedTemporaryFile(
+                    suffix=".keras", delete=False
+                ) as temporary_file:
                     temporary_path = temporary_file.name
                 with zipfile.ZipFile(temporary_path, "w") as destination:
                     for member in source.infolist():
@@ -198,7 +211,9 @@ def load_lstm_model_compat(model_path):
 lstm_model = load_lstm_model_compat(MODEL_PATH)
 output_shape = lstm_model.output_shape
 if not isinstance(output_shape, tuple) or output_shape[-1] != len(MODEL_CLASSES):
-    raise ValueError("Jumlah output model LSTM tidak sesuai dengan kelas di label_classes.json.")
+    raise ValueError(
+        "Jumlah output model LSTM tidak sesuai dengan kelas di label_classes.json."
+    )
 
 
 def get_db_connection():
@@ -221,6 +236,34 @@ def get_db_connection():
     return conn
 
 
+def execute_query(conn, query, params=()):
+    """Execute a parameterized query with the active database's placeholder."""
+    if isinstance(conn, sqlite3.Connection):
+        cursor = conn.cursor()
+        query = query.replace("%s", "?")
+    else:
+        cursor = conn.cursor(dictionary=True)
+    cursor.execute(query, params)
+    return cursor
+
+
+def fetch_one(conn, query, params=()):
+    cursor = execute_query(conn, query, params)
+    try:
+        row = cursor.fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        cursor.close()
+
+
+def fetch_all(conn, query, params=()):
+    cursor = execute_query(conn, query, params)
+    try:
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+
+
 @app.template_filter("wita")
 def format_wita(value):
     if not value:
@@ -233,13 +276,16 @@ def format_wita(value):
             return value
     else:
         dt = value
-    
+
     # Database default assumption: UTC
-    wita_tz = timezone(timedelta(hours=8))
+    wita_tz = pytz.timezone("Asia/Makassar")
     dt_utc = dt.replace(tzinfo=timezone.utc)
     dt_wita = dt_utc.astimezone(wita_tz)
-    
-    months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+
+    months = [
+        "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+        "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
+    ]
     month_name = months[dt_wita.month - 1]
     return dt_wita.strftime(f"%d {month_name} %Y, %H:%M WITA")
 
@@ -257,25 +303,28 @@ def parse_nullable_float(value, minimum, maximum):
 
 
 def haversine(lat1, lon1, lat2, lon2):
-    R = 6371000  # meters
+    radius_meters = 6371000
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
     delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
+    a = (
+        math.sin(delta_phi / 2.0) ** 2
+        + math.cos(phi1)
+        * math.cos(phi2)
+        * math.sin(delta_lambda / 2.0) ** 2
+    )
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
+    return radius_meters * c
 
 
 def generate_ticket_code(conn):
     year = datetime.now().year
-    cursor = conn.cursor()
-    if isinstance(conn, sqlite3.Connection):
-        cursor.execute("SELECT COUNT(*) FROM complaints WHERE ticket_code LIKE ?", (f"CP-{year}-%",))
-        row = cursor.fetchone()
-    else:
-        cursor.execute("SELECT COUNT(*) FROM complaints WHERE ticket_code LIKE %s", (f"CP-{year}-%",))
-        row = cursor.fetchone()
-    count = row[0] if not isinstance(row, dict) else row["COUNT(*)"]
+    row = fetch_one(
+        conn,
+        "SELECT COUNT(*) AS total FROM complaints WHERE ticket_code LIKE %s",
+        (f"CP-{year}-%",),
+    )
+    count = int(row["total"])
     return f"CP-{year}-{(count + 1):04d}"
 
 
@@ -293,7 +342,11 @@ def process_photo(file):
 
     try:
         image = Image.open(file.stream)
-        expected_format = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}[file.mimetype]
+        expected_format = {
+            "image/jpeg": "JPEG",
+            "image/png": "PNG",
+            "image/webp": "WEBP",
+        }[file.mimetype]
         if image.format != expected_format or image.width * image.height > 20_000_000:
             raise ValueError("Foto tidak valid atau resolusinya terlalu besar.")
         image.load()
@@ -308,66 +361,49 @@ def process_photo(file):
 
         image.save(filepath, optimize=True, quality=85)
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as error:
-        raise ValueError("Foto tidak dapat dibaca. Pilih berkas JPEG, PNG, atau WebP yang valid.") from error
+        raise ValueError(
+            "Foto tidak dapat dibaca. Pilih berkas JPEG, PNG, atau WebP yang valid."
+        ) from error
     return f"static/uploads/{filename}"
 
 
 def record_status_event(conn, complaint_id, status, event_type):
-    cursor = conn.cursor()
-    try:
-        if isinstance(conn, sqlite3.Connection):
-            cursor.execute(
-                """
-                INSERT INTO complaint_status_history (complaint_id, status, event_type)
-                VALUES (?, ?, ?)
-                """,
-                (complaint_id, status, event_type),
-            )
-        else:
-            cursor.execute(
-                """
-                INSERT INTO complaint_status_history (complaint_id, status, event_type)
-                VALUES (%s, %s, %s)
-                """,
-                (complaint_id, status, event_type),
-            )
-    finally:
-        cursor.close()
+    cursor = execute_query(
+        conn,
+        """
+        INSERT INTO complaint_status_history (complaint_id, status, event_type)
+        VALUES (%s, %s, %s)
+        """,
+        (complaint_id, status, event_type),
+    )
+    cursor.close()
 
 
 def check_duplication(conn, lat, lng, category):
+    """Return a nearby open ticket for this category, if one exists."""
     if lat is None or lng is None:
         return None
 
     seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-    cursor = conn.cursor()
-    
-    if isinstance(conn, sqlite3.Connection):
-        cursor.execute(
-            """
-            SELECT ticket_code, latitude, longitude FROM complaints 
-            WHERE predicted_category = ? AND status != 'Selesai' AND created_at >= ?
-            AND latitude IS NOT NULL AND longitude IS NOT NULL
-            """,
-            (category, seven_days_ago)
-        )
-        rows = [dict(r) for r in cursor.fetchall()]
-    else:
-        cursor.execute(
-            """
-            SELECT ticket_code, latitude, longitude FROM complaints 
-            WHERE predicted_category = %s AND status != 'Selesai' AND created_at >= %s
-            AND latitude IS NOT NULL AND longitude IS NOT NULL
-            """,
-            (category, seven_days_ago)
-        )
-        rows = cursor.fetchall()
-        
+    rows = fetch_all(
+        conn,
+        """
+        SELECT ticket_code, latitude, longitude
+        FROM complaints
+        WHERE predicted_category = %s
+          AND status != 'Selesai'
+          AND created_at >= %s
+          AND latitude IS NOT NULL
+          AND longitude IS NOT NULL
+        """,
+        (category, seven_days_ago),
+    )
     for row in rows:
-        dist = haversine(lat, lng, float(row["latitude"]), float(row["longitude"]))
-        if dist <= 100:  # 100 meters
+        distance = haversine(
+            lat, lng, float(row["latitude"]), float(row["longitude"])
+        )
+        if distance <= 100:
             return row["ticket_code"]
-            
     return None
 
 
@@ -385,7 +421,12 @@ def normalize_geo_rows(rows, include_reporter=False):
             lng = float(longitude)
         except (TypeError, ValueError):
             continue
-        if not math.isfinite(lat) or not math.isfinite(lng) or not -90 <= lat <= 90 or not -180 <= lng <= 180:
+        if (
+            not math.isfinite(lat)
+            or not math.isfinite(lng)
+            or not -90 <= lat <= 90
+            or not -180 <= lng <= 180
+        ):
             continue
 
         geo_row = {
@@ -460,11 +501,18 @@ def setup_database():
                 ON complaint_status_history (complaint_id, changed_at, id)
                 """
             )
-            columns = [row[1] for row in conn.execute("PRAGMA table_info(complaints)").fetchall()]
+            columns = [
+                row[1]
+                for row in conn.execute("PRAGMA table_info(complaints)").fetchall()
+            ]
             if "ticket_code" not in columns:
                 conn.execute("ALTER TABLE complaints ADD COLUMN ticket_code TEXT")
             rows = conn.execute(
-                "SELECT id, created_at FROM complaints WHERE ticket_code IS NULL OR TRIM(ticket_code) = ''"
+                """
+                SELECT id, created_at
+                FROM complaints
+                WHERE ticket_code IS NULL OR TRIM(ticket_code) = ''
+                """
             ).fetchall()
             for row in rows:
                 try:
@@ -476,7 +524,10 @@ def setup_database():
                     (f"CP-{ticket_year}-L{int(row[0]):08d}", row[0]),
                 )
             conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_complaints_ticket_code_unique ON complaints(ticket_code)"
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                idx_complaints_ticket_code_unique ON complaints(ticket_code)
+                """
             )
             if "photo_path" not in columns:
                 conn.execute("ALTER TABLE complaints ADD COLUMN photo_path TEXT")
@@ -488,8 +539,20 @@ def setup_database():
                 conn.execute("ALTER TABLE complaints ADD COLUMN longitude REAL")
             if "updated_at" not in columns:
                 conn.execute("ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP")
-                conn.execute("UPDATE complaints SET updated_at = created_at WHERE updated_at IS NULL")
-            conn.execute("UPDATE complaints SET verified_category = NULL WHERE TRIM(verified_category) = ''")
+                conn.execute(
+                    """
+                    UPDATE complaints
+                    SET updated_at = created_at
+                    WHERE updated_at IS NULL
+                    """
+                )
+            conn.execute(
+                """
+                UPDATE complaints
+                SET verified_category = NULL
+                WHERE TRIM(verified_category) = ''
+                """
+            )
             for category_column in ("predicted_category", "verified_category"):
                 conn.execute(
                     f"""
@@ -504,9 +567,15 @@ def setup_database():
                 )
             conn.execute(
                 """
-                INSERT INTO complaint_status_history (complaint_id, status, event_type, changed_at)
+                INSERT INTO complaint_status_history (
+                    complaint_id, status, event_type, changed_at
+                )
                 SELECT complaints.id, complaints.status, 'baseline',
-                       COALESCE(complaints.updated_at, complaints.created_at, CURRENT_TIMESTAMP)
+                       COALESCE(
+                           complaints.updated_at,
+                           complaints.created_at,
+                           CURRENT_TIMESTAMP
+                       )
                 FROM complaints
                 WHERE NOT EXISTS (
                     SELECT 1 FROM complaint_status_history
@@ -529,12 +598,16 @@ def setup_database():
                     predicted_category VARCHAR(50) NOT NULL,
                     confidence_score DECIMAL(5,2) NOT NULL,
                     verified_category VARCHAR(50) DEFAULT NULL,
-                    status ENUM('Menunggu Verifikasi', 'Terverifikasi', 'Dalam Tindak Lanjut', 'Selesai') DEFAULT 'Menunggu Verifikasi',
+                    status ENUM(
+                        'Menunggu Verifikasi', 'Terverifikasi',
+                        'Dalam Tindak Lanjut', 'Selesai'
+                    ) DEFAULT 'Menunggu Verifikasi',
                     latitude DECIMAL(10,7) NULL,
                     longitude DECIMAL(10,7) NULL,
                     photo_path VARCHAR(255) DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -558,7 +631,9 @@ def setup_database():
                     status VARCHAR(50) NOT NULL,
                     event_type VARCHAR(20) NOT NULL,
                     changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_status_history_complaint_time (complaint_id, changed_at, id),
+                    INDEX idx_status_history_complaint_time (
+                        complaint_id, changed_at, id
+                    ),
                     CONSTRAINT fk_status_history_complaint
                         FOREIGN KEY (complaint_id) REFERENCES complaints(id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -567,7 +642,9 @@ def setup_database():
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'ticket_code'")
             ticket_code_column = cursor.fetchone()
             if ticket_code_column is None:
-                cursor.execute("ALTER TABLE complaints ADD COLUMN ticket_code VARCHAR(20) NULL")
+                cursor.execute(
+                    "ALTER TABLE complaints ADD COLUMN ticket_code VARCHAR(20) NULL"
+                )
             cursor.execute(
                 """
                 SELECT id, COALESCE(YEAR(created_at), YEAR(CURRENT_DATE))
@@ -582,26 +659,44 @@ def setup_database():
                     (f"CP-{int(ticket_year)}-L{int(complaint_id):08d}", complaint_id),
                 )
             if ticket_code_column is None or ticket_code_column[2] == "YES":
-                cursor.execute("ALTER TABLE complaints MODIFY ticket_code VARCHAR(20) NOT NULL")
+                cursor.execute(
+                    "ALTER TABLE complaints MODIFY ticket_code VARCHAR(20) NOT NULL"
+                )
             cursor.execute(
-                "SHOW INDEX FROM complaints WHERE Column_name = 'ticket_code' AND Non_unique = 0"
+                """
+                SHOW INDEX FROM complaints
+                WHERE Column_name = 'ticket_code' AND Non_unique = 0
+                """
             )
             if cursor.fetchone() is None:
                 cursor.execute(
-                    "CREATE UNIQUE INDEX uq_complaints_ticket_code ON complaints(ticket_code)"
+                    """
+                    CREATE UNIQUE INDEX uq_complaints_ticket_code
+                    ON complaints(ticket_code)
+                    """
                 )
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'photo_path'")
             if cursor.fetchone() is None:
-                cursor.execute("ALTER TABLE complaints ADD COLUMN photo_path VARCHAR(255) DEFAULT NULL")
+                cursor.execute(
+                    "ALTER TABLE complaints ADD COLUMN photo_path "
+                    "VARCHAR(255) DEFAULT NULL"
+                )
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'location_address'")
             if cursor.fetchone() is None:
-                cursor.execute("ALTER TABLE complaints ADD COLUMN location_address VARCHAR(500) DEFAULT NULL")
+                cursor.execute(
+                    "ALTER TABLE complaints ADD COLUMN location_address "
+                    "VARCHAR(500) DEFAULT NULL"
+                )
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'latitude'")
             if cursor.fetchone() is None:
-                cursor.execute("ALTER TABLE complaints ADD COLUMN latitude DECIMAL(10,7) NULL")
+                cursor.execute(
+                    "ALTER TABLE complaints ADD COLUMN latitude DECIMAL(10,7) NULL"
+                )
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'longitude'")
             if cursor.fetchone() is None:
-                cursor.execute("ALTER TABLE complaints ADD COLUMN longitude DECIMAL(10,7) NULL")
+                cursor.execute(
+                    "ALTER TABLE complaints ADD COLUMN longitude DECIMAL(10,7) NULL"
+                )
             cursor.execute("SHOW COLUMNS FROM complaints LIKE 'updated_at'")
             if cursor.fetchone() is None:
                 cursor.execute(
@@ -622,9 +717,15 @@ def setup_database():
                 )
             cursor.execute(
                 """
-                INSERT INTO complaint_status_history (complaint_id, status, event_type, changed_at)
+                INSERT INTO complaint_status_history (
+                    complaint_id, status, event_type, changed_at
+                )
                 SELECT complaints.id, complaints.status, 'baseline',
-                       COALESCE(complaints.updated_at, complaints.created_at, CURRENT_TIMESTAMP)
+                       COALESCE(
+                           complaints.updated_at,
+                           complaints.created_at,
+                           CURRENT_TIMESTAMP
+                       )
                 FROM complaints
                 WHERE NOT EXISTS (
                     SELECT 1 FROM complaint_status_history
@@ -632,7 +733,6 @@ def setup_database():
                 )
                 """
             )
-            conn.commit()
             cursor.close()
         conn.commit()
     finally:
@@ -644,37 +744,39 @@ def init_default_admin():
     admin_email = os.getenv("CIVICPULSE_ADMIN_EMAIL", "admin@civicpulse.id")
     admin_name = os.getenv("CIVICPULSE_ADMIN_NAME", "Administrator CivicPulse")
     if admin_password is not None and len(admin_password) < 12:
-        raise RuntimeError("CIVICPULSE_ADMIN_PASSWORD harus memiliki panjang minimal 12 karakter.")
+        raise RuntimeError(
+            "CIVICPULSE_ADMIN_PASSWORD harus memiliki panjang minimal 12 karakter."
+        )
+
     conn = get_db_connection()
     try:
-        if isinstance(conn, sqlite3.Connection):
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, password_hash FROM users WHERE role = 'admin' LIMIT 1")
-            admin_ada = cursor.fetchone()
-            if not admin_ada:
-                if not admin_password:
-                    app.logger.warning("Admin belum dibuat; set CIVICPULSE_ADMIN_PASSWORD untuk inisialisasi.")
-                    return
-                cursor.execute(
-                    "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
-                    (admin_name, admin_email, generate_password_hash(admin_password), "admin"),
-                )
-                conn.commit()
-            cursor.close()
-        else:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT id, password_hash FROM users WHERE role = 'admin' LIMIT 1")
-            admin_ada = cursor.fetchone()
-            if not admin_ada:
-                if not admin_password:
-                    app.logger.warning("Admin belum dibuat; set CIVICPULSE_ADMIN_PASSWORD untuk inisialisasi.")
-                    return
-                cursor.execute(
-                    "INSERT INTO users (name, email, password_hash, role) VALUES (%s, %s, %s, %s)",
-                    (admin_name, admin_email, generate_password_hash(admin_password), "admin"),
-                )
-                conn.commit()
-            cursor.close()
+        admin = fetch_one(
+            conn,
+            "SELECT id FROM users WHERE role = 'admin' LIMIT 1",
+        )
+        if admin:
+            return
+        if not admin_password:
+            app.logger.warning(
+                "Admin belum dibuat; set CIVICPULSE_ADMIN_PASSWORD untuk inisialisasi."
+            )
+            return
+
+        cursor = execute_query(
+            conn,
+            """
+            INSERT INTO users (name, email, password_hash, role)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                admin_name,
+                admin_email,
+                generate_password_hash(admin_password),
+                "admin",
+            ),
+        )
+        cursor.close()
+        conn.commit()
     finally:
         conn.close()
 
@@ -697,13 +799,17 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if "user_id" not in session or session.get("role") != "admin":
-            flash("Silakan login sebagai administrator untuk mengakses dashboard.", "warning")
+            flash(
+                "Silakan login sebagai administrator untuk mengakses dashboard.",
+                "warning",
+            )
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return decorated_function
 
 
 def bersihkan_input(teks):
+    """Apply the training-time text normalization before LSTM inference."""
     teks = re.sub(r"http\S+|www\.\S+", " ", str(teks).lower())
     teks = re.sub(r"[^a-z0-9\s]", " ", teks)
     teks = re.sub(r"\s+", " ", teks).strip()
@@ -716,6 +822,7 @@ def bersihkan_input(teks):
 @app.route("/", methods=["GET", "POST"])
 @limiter.limit("5 per minute", methods=["POST"])
 def index():
+    """Handle public report submissions and render the public dashboard."""
     hasil_prediksi = None
 
     if request.method == "POST":
@@ -723,11 +830,12 @@ def index():
         judul = request.form.get("title", "").strip()
         deskripsi = request.form.get("description", "").strip()
         area = request.form.get("area", "").strip()
-        location_address = request.form.get("location_address", "").strip()[:500] or None
+        location_address = (
+            request.form.get("location_address", "").strip()[:500] or None
+        )
         raw_latitude = request.form.get("latitude", "")
         raw_longitude = request.form.get("longitude", "")
 
-        # Validasi Panjang Input
         if len(judul) < 5:
             flash("Judul laporan terlalu pendek (minimal 5 karakter).", "warning")
             return redirect(url_for("index"))
@@ -740,7 +848,6 @@ def index():
         if latitude is None or longitude is None:
             location_address = None
 
-        # NLP Inference
         teks_gabungan = bersihkan_input(f"{judul}. {deskripsi}")
         sequences = tokenizer.texts_to_sequences([teks_gabungan])
         seq = tf.keras.preprocessing.sequence.pad_sequences(
@@ -757,7 +864,6 @@ def index():
         conn = get_db_connection()
         photo_path = None
         try:
-            # Check Image Upload
             if "photo" in request.files:
                 try:
                     photo_path = process_photo(request.files["photo"])
@@ -765,33 +871,45 @@ def index():
                     flash(str(error), "warning")
                     return redirect(url_for("index"))
 
-            # Spatial Duplicate Check
-            duplicate_ticket = check_duplication(conn, latitude, longitude, kode_kategori)
+            duplicate_ticket = check_duplication(
+                conn, latitude, longitude, kode_kategori
+            )
             if duplicate_ticket:
-                flash(f"Peringatan: Terdapat laporan serupa di lokasi terdekat yang sedang diproses dengan Nomor Tiket: {duplicate_ticket}.", "warning")
+                flash(
+                    "Peringatan: Terdapat laporan serupa di lokasi terdekat yang "
+                    "sedang diproses dengan Nomor Tiket: "
+                    f"{duplicate_ticket}.",
+                    "warning",
+                )
 
             ticket_code = generate_ticket_code(conn)
-
-            cursor = conn.cursor()
-            if isinstance(conn, sqlite3.Connection):
-                cursor.execute(
-                    """
-                    INSERT INTO complaints
-                    (ticket_code, reporter_name, title, description, area, location_address, predicted_category, confidence_score, status, latitude, longitude, photo_path)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (ticket_code, nama, judul, deskripsi, area, location_address, kode_kategori, confidence, status_awal, latitude, longitude, photo_path),
+            cursor = execute_query(
+                conn,
+                """
+                INSERT INTO complaints (
+                    ticket_code, reporter_name, title, description, area,
+                    location_address, predicted_category, confidence_score,
+                    status, latitude, longitude, photo_path
                 )
-            else:
-                cursor.execute(
-                    """
-                    INSERT INTO complaints
-                    (ticket_code, reporter_name, title, description, area, location_address, predicted_category, confidence_score, status, latitude, longitude, photo_path)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (ticket_code, nama, judul, deskripsi, area, location_address, kode_kategori, confidence, status_awal, latitude, longitude, photo_path),
-                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    ticket_code,
+                    nama,
+                    judul,
+                    deskripsi,
+                    area,
+                    location_address,
+                    kode_kategori,
+                    confidence,
+                    status_awal,
+                    latitude,
+                    longitude,
+                    photo_path,
+                ),
+            )
             complaint_id = cursor.lastrowid
+            cursor.close()
             record_status_event(conn, complaint_id, status_awal, "submitted")
             conn.commit()
         finally:
@@ -807,22 +925,28 @@ def index():
 
     conn = get_db_connection()
     try:
-        if isinstance(conn, sqlite3.Connection):
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15")
-            daftar_laporan = [dict(row) for row in cursor.fetchall()]
-            cursor.execute("SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total FROM complaints GROUP BY kategori")
-            statistik = [dict(row) for row in cursor.fetchall()]
-            cursor.execute("SELECT * FROM complaints WHERE latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY created_at DESC")
-            laporan_geo_rows = [dict(row) for row in cursor.fetchall()]
-        else:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15")
-            daftar_laporan = cursor.fetchall()
-            cursor.execute("SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total FROM complaints GROUP BY kategori")
-            statistik = cursor.fetchall()
-            cursor.execute("SELECT * FROM complaints WHERE latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY created_at DESC")
-            laporan_geo_rows = cursor.fetchall()
+        daftar_laporan = fetch_all(
+            conn,
+            "SELECT * FROM complaints ORDER BY created_at DESC LIMIT 15",
+        )
+        statistik = fetch_all(
+            conn,
+            """
+            SELECT COALESCE(verified_category, predicted_category) AS kategori,
+                   COUNT(*) AS total
+            FROM complaints
+            GROUP BY kategori
+            """,
+        )
+        laporan_geo_rows = fetch_all(
+            conn,
+            """
+            SELECT *
+            FROM complaints
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+            ORDER BY created_at DESC
+            """,
+        )
     finally:
         conn.close()
 
@@ -840,46 +964,35 @@ def index():
 def api_tiket(ticket_code):
     conn = get_db_connection()
     try:
-        if isinstance(conn, sqlite3.Connection):
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM complaints WHERE ticket_code = ?", (ticket_code,))
-            row = cursor.fetchone()
-            if row:
-                row = dict(row)
-                cursor.execute(
-                    """
-                    SELECT status, event_type, changed_at
-                    FROM complaint_status_history
-                    WHERE complaint_id = ?
-                    ORDER BY changed_at, id
-                    """,
-                    (row["id"],),
-                )
-                timeline = [dict(item) for item in cursor.fetchall()]
-            else:
-                timeline = []
-        else:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM complaints WHERE ticket_code = %s", (ticket_code,))
-            row = cursor.fetchone()
-            if row:
-                cursor.execute(
-                    """
-                    SELECT status, event_type, changed_at
-                    FROM complaint_status_history
-                    WHERE complaint_id = %s
-                    ORDER BY changed_at, id
-                    """,
-                    (row["id"],),
-                )
-                timeline = cursor.fetchall()
-            else:
-                timeline = []
+        row = fetch_one(
+            conn,
+            "SELECT * FROM complaints WHERE ticket_code = %s",
+            (ticket_code,),
+        )
+        timeline = (
+            fetch_all(
+                conn,
+                """
+                SELECT status, event_type, changed_at
+                FROM complaint_status_history
+                WHERE complaint_id = %s
+                ORDER BY changed_at, id
+                """,
+                (row["id"],),
+            )
+            if row
+            else []
+        )
     finally:
         conn.close()
 
-    if not row:
-        return jsonify({"status": "error", "message": "Nomor tiket tidak ditemukan."}), 404
+    if row is None:
+        return (
+            jsonify(
+                {"status": "error", "message": "Nomor tiket tidak ditemukan."}
+            ),
+            404,
+        )
 
     # Masking nama pelapor: misal "Ahmad Subagyo" -> "A***"
     reporter = row.get("reporter_name", "")
@@ -887,27 +1000,29 @@ def api_tiket(ticket_code):
 
     kategori_final = row.get("verified_category") or row.get("predicted_category")
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "ticket_code": row["ticket_code"],
-            "title": row["title"],
-            "reporter_init": masked_reporter,
-            "area": row.get("area") or "Wilayah umum",
-            "kategori": LABEL_TAMPILAN.get(kategori_final, kategori_final),
-            "status": row["status"],
-            "created_at": format_wita(row["created_at"]),
-            "updated_at": format_wita(row["updated_at"]),
-            "timeline": [
-                {
-                    "status": item["status"],
-                    "event_type": item["event_type"],
-                    "changed_at": format_wita(item["changed_at"]),
-                }
-                for item in timeline
-            ],
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "ticket_code": row["ticket_code"],
+                "title": row["title"],
+                "reporter_init": masked_reporter,
+                "area": row.get("area") or "Wilayah umum",
+                "kategori": LABEL_TAMPILAN.get(kategori_final, kategori_final),
+                "status": row["status"],
+                "created_at": format_wita(row["created_at"]),
+                "updated_at": format_wita(row["updated_at"]),
+                "timeline": [
+                    {
+                        "status": item["status"],
+                        "event_type": item["event_type"],
+                        "changed_at": format_wita(item["changed_at"]),
+                    }
+                    for item in timeline
+                ],
+            },
         }
-    })
+    )
 
 
 # ==========================================================
@@ -925,16 +1040,11 @@ def login():
 
         conn = get_db_connection()
         try:
-            if isinstance(conn, sqlite3.Connection):
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM users WHERE email = ? LIMIT 1", (email,))
-                user = cursor.fetchone()
-                if user:
-                    user = dict(user)
-            else:
-                cursor = conn.cursor(dictionary=True)
-                cursor.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
-                user = cursor.fetchone()
+            user = fetch_one(
+                conn,
+                "SELECT * FROM users WHERE email = %s LIMIT 1",
+                (email,),
+            )
         finally:
             conn.close()
 
@@ -963,27 +1073,35 @@ def logout():
 @app.route("/admin")
 @admin_required
 def admin_dashboard():
+    """Render the operator dashboard with current reports and summaries."""
     conn = get_db_connection()
     try:
-        if isinstance(conn, sqlite3.Connection):
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC")
-            semua_laporan = [dict(row) for row in cursor.fetchall()]
-            cursor.execute("SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total FROM complaints GROUP BY kategori")
-            statistik = [dict(row) for row in cursor.fetchall()]
-        else:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM complaints ORDER BY created_at DESC")
-            semua_laporan = cursor.fetchall()
-            cursor.execute("SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total FROM complaints GROUP BY kategori")
-            statistik = cursor.fetchall()
+        semua_laporan = fetch_all(
+            conn,
+            "SELECT * FROM complaints ORDER BY created_at DESC",
+        )
+        statistik = fetch_all(
+            conn,
+            """
+            SELECT COALESCE(verified_category, predicted_category) AS kategori,
+                   COUNT(*) AS total
+            FROM complaints
+            GROUP BY kategori
+            """,
+        )
     finally:
         conn.close()
 
     ringkasan_status = {
         "total": len(semua_laporan),
-        "menunggu": sum(1 for r in semua_laporan if r["status"] == "Menunggu Verifikasi"),
-        "proses": sum(1 for r in semua_laporan if r["status"] in ["Terverifikasi", "Dalam Tindak Lanjut"]),
+        "menunggu": sum(
+            report["status"] == "Menunggu Verifikasi"
+            for report in semua_laporan
+        ),
+        "proses": sum(
+            report["status"] in {"Terverifikasi", "Dalam Tindak Lanjut"}
+            for report in semua_laporan
+        ),
         "selesai": sum(1 for r in semua_laporan if r["status"] == "Selesai"),
     }
 
@@ -998,33 +1116,20 @@ def admin_dashboard():
 
 
 def get_admin_live_summary(conn):
-    if isinstance(conn, sqlite3.Connection):
-        cursor = conn.cursor()
-        cursor.execute("SELECT status, COUNT(*) AS total FROM complaints GROUP BY status")
-        status_rows = [dict(row) for row in cursor.fetchall()]
-        cursor.execute(
-            """
-            SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total
-            FROM complaints
-            GROUP BY kategori
-            ORDER BY kategori
-            """
-        )
-        category_rows = [dict(row) for row in cursor.fetchall()]
-    else:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT status, COUNT(*) AS total FROM complaints GROUP BY status")
-        status_rows = cursor.fetchall()
-        cursor.execute(
-            """
-            SELECT COALESCE(verified_category, predicted_category) AS kategori, COUNT(*) AS total
-            FROM complaints
-            GROUP BY kategori
-            ORDER BY kategori
-            """
-        )
-        category_rows = cursor.fetchall()
-    cursor.close()
+    status_rows = fetch_all(
+        conn,
+        "SELECT status, COUNT(*) AS total FROM complaints GROUP BY status",
+    )
+    category_rows = fetch_all(
+        conn,
+        """
+        SELECT COALESCE(verified_category, predicted_category) AS kategori,
+               COUNT(*) AS total
+        FROM complaints
+        GROUP BY kategori
+        ORDER BY kategori
+        """,
+    )
 
     counts = {row["status"]: int(row["total"]) for row in status_rows}
     summary = {
@@ -1049,19 +1154,17 @@ def get_admin_live_summary(conn):
 def admin_photo(complaint_id):
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
-        if isinstance(conn, sqlite3.Connection):
-            cursor.execute("SELECT photo_path FROM complaints WHERE id = ?", (complaint_id,))
-            row = cursor.fetchone()
-        else:
-            cursor.execute("SELECT photo_path FROM complaints WHERE id = %s", (complaint_id,))
-            row = cursor.fetchone()
+        row = fetch_one(
+            conn,
+            "SELECT photo_path FROM complaints WHERE id = %s",
+            (complaint_id,),
+        )
     finally:
         conn.close()
 
     if row is None:
         abort(404)
-    photo_path = row["photo_path"] if isinstance(row, dict) else row[0]
+    photo_path = row["photo_path"]
     filename = os.path.basename(photo_path or "")
     if not re.fullmatch(r"[a-f0-9]{32}\.(?:jpg|webp)", filename):
         abort(404)
@@ -1073,7 +1176,12 @@ def admin_photo(complaint_id):
 def verifikasi_laporan(complaint_id):
     kategori_baru = request.form.get("verified_category") or None
     status_baru = request.form.get("status", "Terverifikasi")
-    allowed_statuses = {"Menunggu Verifikasi", "Terverifikasi", "Dalam Tindak Lanjut", "Selesai"}
+    allowed_statuses = {
+        "Menunggu Verifikasi",
+        "Terverifikasi",
+        "Dalam Tindak Lanjut",
+        "Selesai",
+    }
     accept_header = request.headers.get("Accept", "").lower()
     wants_json = (
         "application/json" in accept_header
@@ -1087,32 +1195,28 @@ def verifikasi_laporan(complaint_id):
 
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
+        current = fetch_one(
+            conn,
+            "SELECT status, predicted_category FROM complaints WHERE id = %s",
+            (complaint_id,),
+        )
+        if current is None:
+            abort(404)
+
+        previous_status = current["status"]
+        predicted_category = current["predicted_category"]
+        update_query = (
+            "UPDATE complaints SET verified_category = %s, status = %s"
+        )
         if isinstance(conn, sqlite3.Connection):
-            cursor.execute(
-                "SELECT status, predicted_category FROM complaints WHERE id = ?",
-                (complaint_id,),
-            )
-            current = cursor.fetchone()
-            if current is None:
-                abort(404)
-            previous_status = current["status"]
-            predicted_category = current["predicted_category"]
-            cursor.execute(
-                "UPDATE complaints SET verified_category = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (kategori_baru, status_baru, complaint_id),
-            )
-        else:
-            cursor.execute(
-                "SELECT status, predicted_category FROM complaints WHERE id = %s",
-                (complaint_id,),
-            )
-            current = cursor.fetchone()
-            if current is None:
-                abort(404)
-            previous_status = current[0]
-            predicted_category = current[1]
-            cursor.execute("UPDATE complaints SET verified_category = %s, status = %s WHERE id = %s", (kategori_baru, status_baru, complaint_id))
+            update_query += ", updated_at = CURRENT_TIMESTAMP"
+        cursor = execute_query(
+            conn,
+            f"{update_query} WHERE id = %s",
+            (kategori_baru, status_baru, complaint_id),
+        )
+        cursor.close()
+
         if previous_status != status_baru:
             record_status_event(conn, complaint_id, status_baru, "status_change")
         conn.commit()
@@ -1128,7 +1232,9 @@ def verifikasi_laporan(complaint_id):
                 "ok": True,
                 "complaint_id": complaint_id,
                 "final_category": final_category,
-                "final_category_label": LABEL_TAMPILAN.get(final_category, final_category),
+                "final_category_label": LABEL_TAMPILAN.get(
+                    final_category, final_category
+                ),
                 "status": status_baru,
                 "ringkasan": summary,
                 "statistik": statistics,
@@ -1144,53 +1250,64 @@ def verifikasi_laporan(complaint_id):
 def export_csv():
     conn = get_db_connection()
     try:
-        if isinstance(conn, sqlite3.Connection):
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT id, ticket_code, title, description, area, predicted_category, confidence_score,
-                       verified_category, COALESCE(verified_category, predicted_category) AS final_category,
-                       status, latitude, longitude, created_at
-                FROM complaints
-                WHERE status != 'Menunggu Verifikasi'
-                ORDER BY created_at DESC
-                """
-            )
-            rows = cursor.fetchall()
-        else:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute(
-                """
-                SELECT id, ticket_code, title, description, area, predicted_category, confidence_score,
-                       verified_category, COALESCE(verified_category, predicted_category) AS final_category,
-                       status, latitude, longitude, created_at
-                FROM complaints
-                WHERE status != 'Menunggu Verifikasi'
-                ORDER BY created_at DESC
-                """
-            )
-            rows = cursor.fetchall()
+        rows = fetch_all(
+            conn,
+            """
+            SELECT id, ticket_code, title, description, area, predicted_category,
+                   confidence_score, verified_category,
+                   COALESCE(verified_category, predicted_category) AS final_category,
+                   status, latitude, longitude, created_at
+            FROM complaints
+            WHERE status != 'Menunggu Verifikasi'
+            ORDER BY created_at DESC
+            """,
+        )
     finally:
         conn.close()
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "id", "ticket_code", "title", "description", "area", "predicted_category",
-        "confidence_score", "verified_category", "final_category",
-        "status", "latitude", "longitude", "created_at"
-    ])
+    writer.writerow(
+        [
+            "id",
+            "ticket_code",
+            "title",
+            "description",
+            "area",
+            "predicted_category",
+            "confidence_score",
+            "verified_category",
+            "final_category",
+            "status",
+            "latitude",
+            "longitude",
+            "created_at",
+        ]
+    )
 
     for row in rows:
-        writer.writerow([
-            row["id"], row["ticket_code"], row["title"], row["description"], row["area"],
-            row["predicted_category"], row["confidence_score"],
-            row["verified_category"], row["final_category"],
-            row["status"], row["latitude"], row["longitude"], row["created_at"]
-        ])
+        writer.writerow(
+            [
+                row["id"],
+                row["ticket_code"],
+                row["title"],
+                row["description"],
+                row["area"],
+                row["predicted_category"],
+                row["confidence_score"],
+                row["verified_category"],
+                row["final_category"],
+                row["status"],
+                row["latitude"],
+                row["longitude"],
+                row["created_at"],
+            ]
+        )
 
     response = Response(output.getvalue(), mimetype="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=civicpulse_verified_dataset.csv"
+    response.headers["Content-Disposition"] = (
+        "attachment; filename=civicpulse_verified_dataset.csv"
+    )
     return response
 
 

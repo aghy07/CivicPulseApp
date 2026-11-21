@@ -23,6 +23,7 @@ Set `FLASK_SECRET_KEY` melalui secret/environment variable platform deployment
 dengan nilai acak minimal 32 karakter. Untuk menjalankan dengan Gunicorn:
 
 ```sh
+python -m pip install gunicorn
 gunicorn --bind 0.0.0.0:${PORT:-8000} app:app
 ```
 
