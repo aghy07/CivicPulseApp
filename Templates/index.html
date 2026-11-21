@@ -264,7 +264,7 @@
             <div class="metric-grid" aria-label="Ringkasan layanan">
                 <div class="metric"><span class="metric-label">Total Laporan</span><strong class="metric-value">{{ totals.count }}</strong></div>
                 <div class="metric"><span class="metric-label">Kategori Terdata</span><strong class="metric-value">{{ statistik|length }}</strong></div>
-                <div class="metric"><span class="metric-label">Akurasi Model Uji</span><strong class="metric-value">97,08%</strong></div>
+                <div class="metric"><span class="metric-label">Model Klasifikasi</span><strong class="metric-value text-value">LSTM · 4 kategori</strong></div>
                 <div class="metric"><span class="metric-label">Status Layanan</span><strong class="metric-value text-value">Beroperasi</strong></div>
             </div>
         </section>
@@ -387,8 +387,7 @@
                         <span class="legend-item"><i class="legend-dot" style="background:#dc2626"></i>Jalan</span>
                         <span class="legend-item"><i class="legend-dot" style="background:#ea580c"></i>Kebersihan</span>
                         <span class="legend-item"><i class="legend-dot" style="background:#16a34a"></i>Taman</span>
-                        <span class="legend-item"><i class="legend-dot" style="background:#0284c7"></i>Air</span>
-                        <span class="legend-item"><i class="legend-dot" style="background:#d97706"></i>Listrik</span>
+                        <span class="legend-item"><i class="legend-dot" style="background:#d97706"></i>Listrik &amp; PJU</span>
                     </div>
                 </article>
                 <article class="panel">
@@ -404,8 +403,7 @@
                                     'jalan_rusak': '#dc2626',
                                     'kebersihan_dan_drainase': '#ea580c',
                                     'taman_penataan_lingkungan': '#16a34a',
-                                    'utilitas_air_pdam': '#0284c7',
-                                    'utilitas_listrik': '#d97706'
+                                    'utilitas_listrik_dan_pju': '#d97706'
                                 } %}
                                 <div class="category-row">
                                     <div class="category-meta">
@@ -465,8 +463,7 @@
             jalan_rusak: '#dc2626',
             kebersihan_dan_drainase: '#ea580c',
             taman_penataan_lingkungan: '#16a34a',
-            utilitas_air_pdam: '#0284c7',
-            utilitas_listrik: '#d97706'
+            utilitas_listrik_dan_pju: '#d97706'
         };
         const geoData = {{ laporan_geo|tojson|safe }};
         const categoryLabels = {{ label_map|tojson|safe }};

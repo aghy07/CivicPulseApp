@@ -1,6 +1,7 @@
 import csv
 import hmac
 import io
+import json
 import math
 import os
 import re
@@ -10,8 +11,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-import joblib
 import mysql.connector
+import numpy as np
+import tensorflow as tf
 from PIL import Image, UnidentifiedImageError
 from flask import (
     Flask,
@@ -31,7 +33,9 @@ from flask_limiter.util import get_remote_address
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "civicpulse_model_final.joblib")
+MODEL_PATH = os.path.join(BASE_DIR, "civicpulse_lstm.keras")
+TOKENIZER_PATH = os.path.join(BASE_DIR, "tokenizer.json")
+LABEL_CLASSES_PATH = os.path.join(BASE_DIR, "label_classes.json")
 DB_PATH = os.path.join(BASE_DIR, "civicpulse.db")
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -104,16 +108,37 @@ def set_security_headers(response):
     return response
 
 
-# Muat model NLP
-model = joblib.load(MODEL_PATH)
-
 LABEL_TAMPILAN = {
     "jalan_rusak": "Kerusakan Jalan & Trotoar",
     "kebersihan_dan_drainase": "Sampah, Kebersihan & Drainase",
     "taman_penataan_lingkungan": "Taman & Penataan Lingkungan",
-    "utilitas_air_pdam": "Gangguan Air Bersih (PDAM)",
-    "utilitas_listrik": "Gangguan Listrik & PJU",
+    "utilitas_listrik_dan_pju": "Gangguan Listrik & PJU",
 }
+
+with open(LABEL_CLASSES_PATH, encoding="utf-8") as file:
+    model_metadata = json.load(file)
+MODEL_CLASSES = model_metadata.get("classes")
+MAX_LEN = model_metadata.get("max_len")
+if (
+    not isinstance(MODEL_CLASSES, list)
+    or not MODEL_CLASSES
+    or not all(
+        isinstance(category, str) and category in LABEL_TAMPILAN
+        for category in MODEL_CLASSES
+    )
+    or len(MODEL_CLASSES) != len(LABEL_TAMPILAN)
+    or set(MODEL_CLASSES) != set(LABEL_TAMPILAN)
+    or not isinstance(MAX_LEN, int)
+    or MAX_LEN <= 0
+):
+    raise ValueError("label_classes.json harus berisi kelas kategori CivicPulse dan max_len positif.")
+
+with open(TOKENIZER_PATH, encoding="utf-8") as file:
+    tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(file.read())
+lstm_model = tf.keras.models.load_model(MODEL_PATH)
+output_shape = lstm_model.output_shape
+if not isinstance(output_shape, tuple) or output_shape[-1] != len(MODEL_CLASSES):
+    raise ValueError("Jumlah output model LSTM tidak sesuai dengan kelas di label_classes.json.")
 
 
 def get_db_connection():
@@ -405,6 +430,18 @@ def setup_database():
                 conn.execute("ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP")
                 conn.execute("UPDATE complaints SET updated_at = created_at WHERE updated_at IS NULL")
             conn.execute("UPDATE complaints SET verified_category = NULL WHERE TRIM(verified_category) = ''")
+            for category_column in ("predicted_category", "verified_category"):
+                conn.execute(
+                    f"""
+                    UPDATE complaints
+                    SET {category_column} = CASE {category_column}
+                        WHEN 'utilitas_listrik' THEN 'utilitas_listrik_dan_pju'
+                        WHEN 'utilitas_air_pdam' THEN 'kebersihan_dan_drainase'
+                        ELSE {category_column}
+                    END
+                    WHERE {category_column} IN ('utilitas_listrik', 'utilitas_air_pdam')
+                    """
+                )
             conn.execute(
                 """
                 INSERT INTO complaint_status_history (complaint_id, status, event_type, changed_at)
@@ -511,6 +548,18 @@ def setup_database():
                     "ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP "
                     "DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
                 )
+            for category_column in ("predicted_category", "verified_category"):
+                cursor.execute(
+                    f"""
+                    UPDATE complaints
+                    SET {category_column} = CASE {category_column}
+                        WHEN 'utilitas_listrik' THEN 'utilitas_listrik_dan_pju'
+                        WHEN 'utilitas_air_pdam' THEN 'kebersihan_dan_drainase'
+                        ELSE {category_column}
+                    END
+                    WHERE {category_column} IN ('utilitas_listrik', 'utilitas_air_pdam')
+                    """
+                )
             cursor.execute(
                 """
                 INSERT INTO complaint_status_history (complaint_id, status, event_type, changed_at)
@@ -595,7 +644,8 @@ def admin_required(f):
 
 
 def bersihkan_input(teks):
-    teks = re.sub(r"http\S+|www\.\S+", "", str(teks))
+    teks = re.sub(r"http\S+|www\.\S+", " ", str(teks).lower())
+    teks = re.sub(r"[^a-z0-9\s]", " ", teks)
     teks = re.sub(r"\s+", " ", teks).strip()
     return teks
 
@@ -632,9 +682,15 @@ def index():
 
         # NLP Inference
         teks_gabungan = bersihkan_input(f"{judul}. {deskripsi}")
-        probs = model.predict_proba([teks_gabungan])[0]
-        idx_max = probs.argmax()
-        kode_kategori = str(model.classes_[idx_max])
+        sequences = tokenizer.texts_to_sequences([teks_gabungan])
+        seq = tf.keras.preprocessing.sequence.pad_sequences(
+            sequences,
+            maxlen=MAX_LEN,
+            padding="post",
+        )
+        probs = lstm_model.predict(seq, verbose=0)[0]
+        idx_max = int(np.argmax(probs))
+        kode_kategori = MODEL_CLASSES[idx_max]
         confidence = round(float(probs[idx_max]) * 100, 2)
         status_awal = "Terverifikasi" if confidence >= 60.0 else "Menunggu Verifikasi"
 
