@@ -7,7 +7,9 @@ import os
 import re
 import secrets
 import sqlite3
+import tempfile
 import uuid
+import zipfile
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
@@ -135,7 +137,65 @@ if (
 
 with open(TOKENIZER_PATH, encoding="utf-8") as file:
     tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(file.read())
-lstm_model = tf.keras.models.load_model(MODEL_PATH)
+
+
+def load_lstm_model_compat(model_path):
+    try:
+        return tf.keras.models.load_model(model_path, compile=False)
+    except (TypeError, ValueError) as error:
+        if "quantization_config" not in str(error):
+            raise
+
+        temporary_path = None
+        try:
+            with zipfile.ZipFile(model_path, "r") as source:
+                try:
+                    config = json.load(io.BytesIO(source.read("config.json")))
+                except KeyError as config_error:
+                    raise ValueError(
+                        f"Model archive {model_path} does not contain config.json."
+                    ) from config_error
+
+                def strip_null_quantization_config(value):
+                    changed = False
+                    if isinstance(value, dict):
+                        layer_config = value.get("config")
+                        if (
+                            isinstance(value.get("class_name"), str)
+                            and isinstance(layer_config, dict)
+                            and "quantization_config" in layer_config
+                            and layer_config["quantization_config"] is None
+                        ):
+                            del layer_config["quantization_config"]
+                            changed = True
+                        for child in value.values():
+                            changed = strip_null_quantization_config(child) or changed
+                    elif isinstance(value, list):
+                        for child in value:
+                            changed = strip_null_quantization_config(child) or changed
+                    return changed
+
+                if not strip_null_quantization_config(config):
+                    raise
+
+                with tempfile.NamedTemporaryFile(suffix=".keras", delete=False) as temporary_file:
+                    temporary_path = temporary_file.name
+                with zipfile.ZipFile(temporary_path, "w") as destination:
+                    for member in source.infolist():
+                        contents = source.read(member.filename)
+                        if member.filename == "config.json":
+                            contents = json.dumps(
+                                config, ensure_ascii=False, separators=(",", ":")
+                            ).encode("utf-8")
+                        destination.writestr(member, contents)
+
+            return tf.keras.models.load_model(temporary_path, compile=False)
+        finally:
+            if temporary_path is not None:
+                os.remove(temporary_path)
+
+
+lstm_model = load_lstm_model_compat(MODEL_PATH)
 output_shape = lstm_model.output_shape
 if not isinstance(output_shape, tuple) or output_shape[-1] != len(MODEL_CLASSES):
     raise ValueError("Jumlah output model LSTM tidak sesuai dengan kelas di label_classes.json.")

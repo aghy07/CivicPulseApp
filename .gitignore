@@ -1,0 +1,11 @@
+.venv/
+.venv-*/
+venv/
+__pycache__/
+*.pyc
+*.tmp
+.DS_Store
+.env
+civicpulse.db
+static/uploads/*
+!static/uploads/.gitkeep
